@@ -357,6 +357,150 @@ app.get("/api/admin/transfer-requests", async (req, res) => {
   res.json({ success: true, data: requests });
 });
 
+// ── Gruppi ────────────────────────────────────────────────────────────────
+
+const MAX_GROUPS_CREATED = 3;
+const MAX_GROUPS_JOINED = 5;
+
+function generateInviteCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  return Array.from({ length: 6 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+}
+
+// POST /api/groups — crea un nuovo gruppo
+app.post("/api/groups", requireAuth, (req, res) => {
+  const { name, description, maxMembers } = req.body;
+  if (!name?.trim()) return res.status(400).json({ success: false, error: "Nome gruppo richiesto" });
+
+  // Verifica limite gruppi creati
+  const created = db.prepare("SELECT COUNT(*) as count FROM groups WHERE created_by = ?").get(req.user.userId);
+  if (created.count >= MAX_GROUPS_CREATED) {
+    return res.status(403).json({ success: false, error: `Puoi creare al massimo ${MAX_GROUPS_CREATED} gruppi` });
+  }
+
+  // Verifica limite gruppi a cui partecipa
+  const joined = db.prepare("SELECT COUNT(*) as count FROM group_members WHERE user_id = ?").get(req.user.userId);
+  if (joined.count >= MAX_GROUPS_JOINED) {
+    return res.status(403).json({ success: false, error: `Puoi partecipare a massimo ${MAX_GROUPS_JOINED} gruppi` });
+  }
+
+  // Genera invite code univoco
+  let inviteCode;
+  do { inviteCode = generateInviteCode(); }
+  while (db.prepare("SELECT id FROM groups WHERE invite_code = ?").get(inviteCode));
+
+  const result = db.prepare(
+    "INSERT INTO groups (name, description, created_by, invite_code, max_members) VALUES (?, ?, ?, ?, ?)"
+  ).run(name.trim(), description?.trim() || null, req.user.userId, inviteCode, maxMembers || 50);
+
+  // Aggiunge il creatore come membro
+  db.prepare("INSERT INTO group_members (group_id, user_id) VALUES (?, ?)").run(result.lastInsertRowid, req.user.userId);
+
+  const group = db.prepare("SELECT * FROM groups WHERE id = ?").get(result.lastInsertRowid);
+  res.json({ success: true, group, inviteUrl: `${process.env.FRONTEND_URL}/join/${inviteCode}` });
+});
+
+// GET /api/groups — lista gruppi dell'utente
+app.get("/api/groups", requireAuth, (req, res) => {
+  const groups = db.prepare(`
+    SELECT g.*, 
+           (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) as member_count,
+           (g.created_by = ?) as is_admin
+    FROM groups g
+    JOIN group_members gm ON g.id = gm.group_id
+    WHERE gm.user_id = ?
+    ORDER BY gm.joined_at DESC
+  `).all(req.user.userId, req.user.userId);
+
+  res.json({ success: true, data: groups });
+});
+
+// GET /api/groups/:inviteCode — info gruppo da link invito (senza auth)
+app.get("/api/groups/:inviteCode", (req, res) => {
+  const group = db.prepare(`
+    SELECT g.id, g.name, g.description, g.invite_code, g.max_members,
+           (SELECT COUNT(*) FROM group_members WHERE group_id = g.id) as member_count
+    FROM groups g WHERE g.invite_code = ?
+  `).get(req.params.inviteCode.toUpperCase());
+
+  if (!group) return res.status(404).json({ success: false, error: "Gruppo non trovato" });
+  res.json({ success: true, group });
+});
+
+// POST /api/groups/:inviteCode/join — entra in un gruppo
+app.post("/api/groups/:inviteCode/join", requireAuth, (req, res) => {
+  const group = db.prepare("SELECT * FROM groups WHERE invite_code = ?").get(req.params.inviteCode.toUpperCase());
+  if (!group) return res.status(404).json({ success: false, error: "Gruppo non trovato" });
+
+  // Verifica se già membro
+  const alreadyMember = db.prepare("SELECT id FROM group_members WHERE group_id = ? AND user_id = ?").get(group.id, req.user.userId);
+  if (alreadyMember) return res.status(409).json({ success: false, error: "Sei già membro di questo gruppo" });
+
+  // Verifica limite gruppi a cui partecipa
+  const joined = db.prepare("SELECT COUNT(*) as count FROM group_members WHERE user_id = ?").get(req.user.userId);
+  if (joined.count >= MAX_GROUPS_JOINED) {
+    return res.status(403).json({ success: false, error: `Puoi partecipare a massimo ${MAX_GROUPS_JOINED} gruppi` });
+  }
+
+  // Verifica limite membri del gruppo
+  const memberCount = db.prepare("SELECT COUNT(*) as count FROM group_members WHERE group_id = ?").get(group.id);
+  if (memberCount.count >= group.max_members) {
+    return res.status(403).json({ success: false, error: "Il gruppo ha raggiunto il numero massimo di membri" });
+  }
+
+  db.prepare("INSERT INTO group_members (group_id, user_id) VALUES (?, ?)").run(group.id, req.user.userId);
+  res.json({ success: true, message: `Benvenuto nel gruppo "${group.name}"!` });
+});
+
+// GET /api/groups/:inviteCode/leaderboard — classifica del gruppo
+app.get("/api/groups/:inviteCode/leaderboard", requireAuth, (req, res) => {
+  const group = db.prepare("SELECT * FROM groups WHERE invite_code = ?").get(req.params.inviteCode.toUpperCase());
+  if (!group) return res.status(404).json({ success: false, error: "Gruppo non trovato" });
+
+  // Verifica che l'utente sia membro
+  const isMember = db.prepare("SELECT id FROM group_members WHERE group_id = ? AND user_id = ?").get(group.id, req.user.userId);
+  if (!isMember) return res.status(403).json({ success: false, error: "Non sei membro di questo gruppo" });
+
+  // Lista membri con i loro address (la classifica reale viene calcolata on-chain lato frontend)
+  const members = db.prepare(`
+    SELECT u.id, u.email, u.address, u.is_up, gm.joined_at
+    FROM group_members gm
+    JOIN users u ON gm.user_id = u.id
+    WHERE gm.group_id = ?
+    ORDER BY gm.joined_at ASC
+  `).all(group.id);
+
+  // Partite escluse dal gruppo
+  const excluded = db.prepare(
+    "SELECT contract_match_id FROM group_excluded_matches WHERE group_id = ?"
+  ).all(group.id).map(r => r.contract_match_id);
+
+  res.json({ success: true, group, members, excludedMatches: excluded });
+});
+
+// DELETE /api/groups/:inviteCode/leave — abbandona un gruppo
+app.delete("/api/groups/:inviteCode/leave", requireAuth, (req, res) => {
+  const group = db.prepare("SELECT * FROM groups WHERE invite_code = ?").get(req.params.inviteCode.toUpperCase());
+  if (!group) return res.status(404).json({ success: false, error: "Gruppo non trovato" });
+
+  if (group.created_by === req.user.userId) {
+    return res.status(400).json({ success: false, error: "Il creatore non può abbandonare il gruppo. Eliminalo invece." });
+  }
+
+  db.prepare("DELETE FROM group_members WHERE group_id = ? AND user_id = ?").run(group.id, req.user.userId);
+  res.json({ success: true, message: "Hai abbandonato il gruppo" });
+});
+
+// DELETE /api/groups/:inviteCode — elimina gruppo (solo creatore)
+app.delete("/api/groups/:inviteCode", requireAuth, (req, res) => {
+  const group = db.prepare("SELECT * FROM groups WHERE invite_code = ?").get(req.params.inviteCode.toUpperCase());
+  if (!group) return res.status(404).json({ success: false, error: "Gruppo non trovato" });
+  if (group.created_by !== req.user.userId) return res.status(403).json({ success: false, error: "Solo il creatore può eliminare il gruppo" });
+
+  db.prepare("DELETE FROM groups WHERE id = ?").run(group.id);
+  res.json({ success: true, message: "Gruppo eliminato" });
+});
+
 // ── Avvio ─────────────────────────────────────────────────────────────────
 app.listen(PORT, "127.0.0.1", () => {
   console.log("═══════════════════════════════════════");
