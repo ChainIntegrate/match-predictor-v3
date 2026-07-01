@@ -1,0 +1,173 @@
+// auth.js — magic link, JWT access token e refresh token
+const crypto = require("crypto");
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
+const { v4: uuidv4 } = require("uuid");
+const nodemailer = require("nodemailer");
+const db = require("./db");
+
+const JWT_SECRET = process.env.JWT_SECRET;
+const ACCESS_TOKEN_EXPIRY = "7d";
+const REFRESH_TOKEN_EXPIRY_DAYS = 90;
+const MAGIC_LINK_EXPIRY_MINUTES = 15;
+const BCRYPT_ROUNDS = 10;
+
+// ── Email transporter ─────────────────────────────────────────────────────
+
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT || "587"),
+  secure: process.env.SMTP_SECURE === "true",
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS
+  }
+});
+
+// ── Magic link ────────────────────────────────────────────────────────────
+
+/// Genera un magic link, lo salva nel DB e lo invia via email.
+async function sendMagicLink(email) {
+  // Cancella eventuali link precedenti non usati per questa email
+  db.prepare("DELETE FROM magic_links WHERE email = ? AND used = 0").run(email);
+
+  const token = uuidv4().replace(/-/g, "") + crypto.randomBytes(16).toString("hex");
+  const expiresAt = Math.floor(Date.now() / 1000) + MAGIC_LINK_EXPIRY_MINUTES * 60;
+
+  db.prepare(
+    "INSERT INTO magic_links (email, token, expires_at) VALUES (?, ?, ?)"
+  ).run(email, token, expiresAt);
+
+  const link = `${process.env.FRONTEND_URL}/auth?token=${token}`;
+
+  await transporter.sendMail({
+    from: `"MatchPredictor" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+    to: email,
+    subject: "Il tuo link di accesso a MatchPredictor",
+    html: `
+      <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h2>Accedi a MatchPredictor</h2>
+        <p>Clicca il link qui sotto per accedere. Valido per ${MAGIC_LINK_EXPIRY_MINUTES} minuti.</p>
+        <a href="${link}" style="
+          display: inline-block;
+          background: #3498db;
+          color: white;
+          padding: 12px 24px;
+          border-radius: 8px;
+          text-decoration: none;
+          font-weight: bold;
+          margin: 16px 0;
+        ">Accedi ora</a>
+        <p style="color: #666; font-size: 13px;">
+          Se non hai richiesto tu questo link, ignoralo.
+        </p>
+      </div>
+    `
+  });
+
+  return token; // restituito solo per i test, non esporlo al client
+}
+
+/// Verifica un magic link e restituisce l'email associata se valido.
+function verifyMagicLink(token) {
+  const row = db.prepare(
+    "SELECT * FROM magic_links WHERE token = ? AND used = 0 AND expires_at > unixepoch()"
+  ).get(token);
+
+  if (!row) return null;
+
+  // Marca come usato (monouso)
+  db.prepare("UPDATE magic_links SET used = 1 WHERE id = ?").run(row.id);
+
+  return row.email;
+}
+
+// ── JWT access token ──────────────────────────────────────────────────────
+
+function generateAccessToken(userId, email, address) {
+  return jwt.sign({ userId, email, address }, JWT_SECRET, {
+    expiresIn: ACCESS_TOKEN_EXPIRY
+  });
+}
+
+function verifyAccessToken(token) {
+  try {
+    return jwt.verify(token, JWT_SECRET);
+  } catch {
+    return null;
+  }
+}
+
+// ── Refresh token ─────────────────────────────────────────────────────────
+
+/// Genera un refresh token, lo salva hashato nel DB, restituisce il token in chiaro.
+async function generateRefreshToken(userId) {
+  const token = crypto.randomBytes(48).toString("hex");
+  const tokenHash = await bcrypt.hash(token, BCRYPT_ROUNDS);
+  const expiresAt = Math.floor(Date.now() / 1000) + REFRESH_TOKEN_EXPIRY_DAYS * 86400;
+
+  db.prepare(
+    "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)"
+  ).run(userId, tokenHash, expiresAt);
+
+  return token;
+}
+
+/// Verifica un refresh token e, se valido, emette nuovi access + refresh token.
+/// Ruota il refresh token ad ogni uso (token rotation).
+async function rotateRefreshToken(incomingToken) {
+  // Cerca tutti i refresh token non scaduti per verificare l'incoming
+  const rows = db.prepare(
+    "SELECT * FROM refresh_tokens WHERE expires_at > unixepoch()"
+  ).all();
+
+  let matchedRow = null;
+  for (const row of rows) {
+    if (await bcrypt.compare(incomingToken, row.token_hash)) {
+      matchedRow = row;
+      break;
+    }
+  }
+
+  if (!matchedRow) return null;
+
+  // Recupera l'utente
+  const user = db.prepare("SELECT * FROM users WHERE id = ?").get(matchedRow.user_id);
+  if (!user) return null;
+
+  // Invalida il vecchio refresh token (rotation)
+  db.prepare("DELETE FROM refresh_tokens WHERE id = ?").run(matchedRow.id);
+
+  // Genera nuovi token
+  const newAccessToken = generateAccessToken(user.id, user.email, user.address);
+  const newRefreshToken = await generateRefreshToken(user.id);
+
+  return { accessToken: newAccessToken, refreshToken: newRefreshToken, user };
+}
+
+/// Middleware Express: verifica il JWT nell'header Authorization.
+function requireAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    return res.status(401).json({ success: false, error: "Token mancante" });
+  }
+
+  const token = authHeader.slice(7);
+  const payload = verifyAccessToken(token);
+
+  if (!payload) {
+    return res.status(401).json({ success: false, error: "Token non valido o scaduto" });
+  }
+
+  req.user = payload;
+  next();
+}
+
+module.exports = {
+  sendMagicLink,
+  verifyMagicLink,
+  generateAccessToken,
+  generateRefreshToken,
+  rotateRefreshToken,
+  requireAuth
+};
