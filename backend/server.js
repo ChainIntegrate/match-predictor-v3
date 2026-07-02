@@ -51,6 +51,15 @@ app.get("/api/health", (req, res) => {
   res.json({ success: true, status: "online", service: "matchpredictor-v3" });
 });
 
+// ── Auth: verifica se email già registrata ────────────────────────────────
+// GET /api/auth/check-email?email=xxx
+app.get("/api/auth/check-email", (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).json({ success: false, error: "Email richiesta" });
+  const user = db.prepare("SELECT id FROM users WHERE email = ?").get(email.toLowerCase().trim());
+  res.json({ success: true, exists: !!user });
+});
+
 // ── Auth: richiedi magic link ─────────────────────────────────────────────
 // POST /api/auth/request-link  { email }
 app.post("/api/auth/request-link", async (req, res) => {
@@ -77,19 +86,17 @@ app.get("/api/auth/verify", async (req, res) => {
   const email = verifyMagicLink(token);
   if (!email) return res.status(401).json({ success: false, error: "Link non valido o scaduto" });
 
-  // Trova o crea l'utente
   let user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
 
   if (!user) {
     // Primo accesso: genera una EOA dedicata
     const { address, encryptedPrivateKey } = generateUserWallet();
     db.prepare(
-      "INSERT INTO users (email, address, encrypted_private_key) VALUES (?, ?, ?)"
+      "INSERT INTO users (email, address, encrypted_private_key, terms_accepted) VALUES (?, ?, ?, 1)"
     ).run(email, address, encryptedPrivateKey);
     user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
   }
 
-  // Genera access token + refresh token
   const accessToken = generateAccessToken(user.id, user.email, user.address);
   const refreshToken = await generateRefreshToken(user.id);
 
@@ -97,7 +104,13 @@ app.get("/api/auth/verify", async (req, res) => {
     success: true,
     accessToken,
     refreshToken,
-    user: { email: user.email, address: user.address, isUp: !!user.is_up }
+    user: {
+      email: user.email,
+      address: user.address,
+      isUp: !!user.is_up,
+      displayName: user.display_name || null,
+      isNewUser: !user.terms_accepted
+    }
   });
 });
 
@@ -124,6 +137,20 @@ app.get("/api/user/profile", requireAuth, (req, res) => {
   const user = db.prepare("SELECT id, email, address, is_up, created_at FROM users WHERE id = ?").get(req.user.userId);
   if (!user) return res.status(404).json({ success: false, error: "Utente non trovato" });
   res.json({ success: true, user });
+});
+
+// ── Utente: aggiorna display name ─────────────────────────────────────────
+// POST /api/user/display-name  { displayName }
+app.post("/api/user/display-name", requireAuth, (req, res) => {
+  const { displayName } = req.body;
+  const name = displayName?.trim();
+
+  if (name && name.length > 30) {
+    return res.status(400).json({ success: false, error: "Display name troppo lungo (max 30 caratteri)" });
+  }
+
+  db.prepare("UPDATE users SET display_name = ? WHERE id = ?").run(name || null, req.user.userId);
+  res.json({ success: true, displayName: name || null });
 });
 
 // ── Utente: collega UP ────────────────────────────────────────────────────
@@ -357,6 +384,25 @@ app.get("/api/admin/transfer-requests", async (req, res) => {
   res.json({ success: true, data: requests });
 });
 
+// ── Utenti: display names pubblici ───────────────────────────────────────
+// GET /api/users/display-names?addresses=0x...,0x...
+app.get("/api/users/display-names", (req, res) => {
+  const { addresses } = req.query;
+  if (!addresses) return res.json({ success: true, data: {} });
+
+  const addrs = addresses.split(",").map(a => a.toLowerCase().trim()).filter(a => a.startsWith("0x"));
+  if (addrs.length === 0) return res.json({ success: true, data: {} });
+
+  const placeholders = addrs.map(() => "?").join(",");
+  const users = db.prepare(
+    `SELECT address, display_name FROM users WHERE LOWER(address) IN (${placeholders})`
+  ).all(...addrs);
+
+  const map = {};
+  users.forEach(u => { map[u.address.toLowerCase()] = u.display_name; });
+  res.json({ success: true, data: map });
+});
+
 // ── Gruppi ────────────────────────────────────────────────────────────────
 
 const MAX_GROUPS_CREATED = 3;
@@ -463,7 +509,7 @@ app.get("/api/groups/:inviteCode/leaderboard", requireAuth, (req, res) => {
 
   // Lista membri con i loro address (la classifica reale viene calcolata on-chain lato frontend)
   const members = db.prepare(`
-    SELECT u.id, u.email, u.address, u.is_up, gm.joined_at
+    SELECT u.id, u.email, u.address, u.is_up, u.display_name, gm.joined_at
     FROM group_members gm
     JOIN users u ON gm.user_id = u.id
     WHERE gm.group_id = ?

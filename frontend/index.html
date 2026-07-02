@@ -507,6 +507,7 @@
     <span class="user-email" id="user-email"></span>
     <span class="user-address" id="user-address"></span>
   </div>
+  <button class="btn-ghost btn-sm" id="btn-edit-name" onclick="document.getElementById('modal-display-name').style.display='flex'">✏️ Name</button>
   <button class="btn-ghost btn-sm" id="btn-logout" data-i18n="logout">Logout</button>
 </div>
 
@@ -525,12 +526,27 @@
       <h2 data-i18n="login_title">Predict. Win. Own.</h2>
       <p data-i18n="login_subtitle">Enter your email to receive a magic link. No password, no wallet required.</p>
 
+      <div class="toggle-bar" style="margin-bottom: 20px;">
+        <button class="toggle-btn active" id="toggle-login" data-i18n="toggle_login">Login</button>
+        <button class="toggle-btn" id="toggle-register" data-i18n="toggle_register">Register</button>
+      </div>
+
+      <!-- Form LOGIN (utente esistente) -->
       <div id="login-form">
         <div class="form-group">
           <label data-i18n="email_label">Email address</label>
           <input type="email" id="login-email" placeholder="you@example.com">
         </div>
+        <button class="btn-primary" id="btn-send-link" disabled data-i18n="send_link">Send magic link</button>
+        <div class="status" id="login-status" style="display:none;"></div>
+      </div>
 
+      <!-- Form REGISTER (nuovo utente) -->
+      <div id="register-form" style="display:none;">
+        <div class="form-group">
+          <label data-i18n="email_label">Email address</label>
+          <input type="email" id="register-email" placeholder="you@example.com">
+        </div>
         <div class="checkbox-group">
           <input type="checkbox" id="check-privacy">
           <label for="check-privacy">
@@ -539,7 +555,6 @@
             <span data-i18n="privacy_accept2">and consent to the processing of my email for login purposes.</span>
           </label>
         </div>
-
         <div class="checkbox-group">
           <input type="checkbox" id="check-terms">
           <label for="check-terms">
@@ -547,16 +562,15 @@
             <a href="/terms" target="_blank" data-i18n="terms_link">Terms of Service</a>.
           </label>
         </div>
-
-        <button class="btn-primary" id="btn-send-link" disabled data-i18n="send_link">Send magic link</button>
-        <div class="status" id="login-status" style="display:none;"></div>
+        <button class="btn-primary" id="btn-register" disabled data-i18n="register_btn">Create account</button>
+        <div class="status" id="register-status" style="display:none;"></div>
       </div>
 
       <div id="link-sent" style="display:none;">
         <div style="text-align:center; padding: 16px 0;">
           <div style="font-size: 40px; margin-bottom: 12px;">📬</div>
           <p style="font-weight: 600; margin-bottom: 8px;" data-i18n="link_sent_title">Check your email!</p>
-          <p style="color: var(--chalk-dim); font-size: 13px;" data-i18n="link_sent_sub">We sent a magic link to <strong id="sent-to-email"></strong>. Click it to log in. Valid for 15 minutes.</p>
+          <p style="color: var(--chalk-dim); font-size: 13px;" data-i18n="link_sent_sub">We sent a magic link. Click it to log in. Valid for 15 minutes.</p>
         </div>
       </div>
     </div>
@@ -643,6 +657,21 @@
 
 </main>
 
+<!-- Modale display name -->
+<div id="modal-display-name" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); z-index:100; align-items:center; justify-content:center;">
+  <div style="background:var(--card); border:1px solid var(--line); border-radius:16px; padding:28px; max-width:400px; width:90%; margin:auto;">
+    <h3 style="margin-bottom:8px;">Choose your display name</h3>
+    <p style="color:var(--chalk-dim); font-size:13px; margin-bottom:16px;">This name will appear in the leaderboard. You can change it anytime.</p>
+    <input type="text" id="modal-display-name-input"
+           style="width:100%; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; color:var(--chalk); font-family:inherit; font-size:14px; margin-bottom:12px;"
+           placeholder="e.g. ThePredictor" maxlength="30">
+    <div style="display:flex; gap:8px;">
+      <button class="btn-primary" id="btn-save-display-name" style="flex:1;">Save</button>
+      <button class="btn-ghost" id="btn-skip-display-name">Skip</button>
+    </div>
+  </div>
+</div>
+
 <footer>
   MatchPredictor · <a href="https://chainintegrate.it" target="_blank">ChainIntegrate</a> · 
   <span data-i18n="footer_entertainment">Entertainment only · No gambling · No profit</span><br>
@@ -692,6 +721,8 @@ const strings = {
     terms_accept: "I confirm this is an entertainment platform with no monetary prizes. I accept the",
     terms_link: "Terms of Service",
     send_link: "Send magic link",
+    toggle_login: "Login", toggle_register: "Register",
+    register_btn: "Create account",
     link_sent_title: "Check your email!",
     link_sent_sub: "We sent a magic link. Click it to log in. Valid for 15 minutes.",
     upcoming: "Upcoming", played: "Played",
@@ -731,6 +762,8 @@ const strings = {
     terms_accept: "Confermo che questa è una piattaforma di intrattenimento senza premi in denaro. Accetto i",
     terms_link: "Termini di servizio",
     send_link: "Invia link magico",
+    toggle_login: "Accedi", toggle_register: "Registrati",
+    register_btn: "Crea account",
     link_sent_title: "Controlla la tua email!",
     link_sent_sub: "Abbiamo inviato un link magico. Cliccalo per accedere. Valido 15 minuti.",
     upcoming: "Da giocare", played: "Giocate",
@@ -1391,6 +1424,9 @@ async function init() {
     } else {
       showTab("matches");
     }
+    if (loggedViaLink && !currentUser.displayName) {
+      setTimeout(showDisplayNameModal, 800);
+    }
   } else {
     showTab("login");
   }
@@ -1402,39 +1438,108 @@ async function init() {
 // EVENT LISTENERS
 // ============================================================
 
-// Login form
-const emailInput = document.getElementById("login-email");
-const checkPrivacy = document.getElementById("check-privacy");
-const checkTerms = document.getElementById("check-terms");
+// Toggle Login / Register
+document.getElementById("toggle-login").addEventListener("click", () => {
+  document.getElementById("toggle-login").classList.add("active");
+  document.getElementById("toggle-register").classList.remove("active");
+  document.getElementById("login-form").style.display = "block";
+  document.getElementById("register-form").style.display = "none";
+});
+
+document.getElementById("toggle-register").addEventListener("click", () => {
+  document.getElementById("toggle-register").classList.add("active");
+  document.getElementById("toggle-login").classList.remove("active");
+  document.getElementById("register-form").style.display = "block";
+  document.getElementById("login-form").style.display = "none";
+});
+
+// Login form (utente esistente)
+const loginEmailInput = document.getElementById("login-email");
 const btnSendLink = document.getElementById("btn-send-link");
 
-function updateSendBtn() {
-  btnSendLink.disabled = !emailInput.value.includes("@") || !checkPrivacy.checked || !checkTerms.checked;
-}
-
-emailInput.addEventListener("input", updateSendBtn);
-checkPrivacy.addEventListener("change", updateSendBtn);
-checkTerms.addEventListener("change", updateSendBtn);
+loginEmailInput.addEventListener("input", () => {
+  btnSendLink.disabled = !loginEmailInput.value.includes("@");
+});
 
 btnSendLink.addEventListener("click", async () => {
   btnSendLink.disabled = true;
   btnSendLink.textContent = "…";
-  const email = emailInput.value.trim().toLowerCase();
-
+  const email = loginEmailInput.value.trim().toLowerCase();
+  const checkRes = await api("GET", `/auth/check-email?email=${encodeURIComponent(email)}`, null, false);
+  if (checkRes.success && !checkRes.exists) {
+    const statusEl = document.getElementById("login-status");
+    statusEl.style.display = "block";
+    statusEl.textContent = lang === "it"
+      ? "Email non trovata. Usa Registrati per creare un account."
+      : "Email not found. Use Register to create an account.";
+    statusEl.className = "status error";
+    btnSendLink.disabled = false;
+    btnSendLink.textContent = t("send_link");
+    return;
+  }
   const res = await api("POST", "/auth/request-link", { email }, false);
   if (res.success) {
     document.getElementById("login-form").style.display = "none";
     document.getElementById("link-sent").style.display = "block";
-    document.getElementById("sent-to-email").textContent = email;
   } else {
+    const statusEl = document.getElementById("login-status");
+    statusEl.style.display = "block";
+    statusEl.textContent = res.error || "Error";
+    statusEl.className = "status error";
     btnSendLink.disabled = false;
     btnSendLink.textContent = t("send_link");
-    const status = document.getElementById("login-status");
-    status.style.display = "block";
-    status.textContent = res.error || "Error";
-    status.className = "status error";
   }
 });
+
+// Register form (nuovo utente)
+const registerEmailInput = document.getElementById("register-email");
+const checkPrivacy = document.getElementById("check-privacy");
+const checkTerms = document.getElementById("check-terms");
+const btnRegister = document.getElementById("btn-register");
+
+function updateRegisterBtn() {
+  btnRegister.disabled = !registerEmailInput.value.includes("@") || !checkPrivacy.checked || !checkTerms.checked;
+}
+
+registerEmailInput.addEventListener("input", updateRegisterBtn);
+checkPrivacy.addEventListener("change", updateRegisterBtn);
+checkTerms.addEventListener("change", updateRegisterBtn);
+
+btnRegister.addEventListener("click", async () => {
+  btnRegister.disabled = true;
+  btnRegister.textContent = "…";
+  const email = registerEmailInput.value.trim().toLowerCase();
+  const res = await api("POST", "/auth/request-link", { email }, false);
+  if (res.success) {
+    document.getElementById("register-form").style.display = "none";
+    document.getElementById("link-sent").style.display = "block";
+  } else {
+    const statusEl = document.getElementById("register-status");
+    statusEl.style.display = "block";
+    statusEl.textContent = res.error || "Error";
+    statusEl.className = "status error";
+    btnRegister.disabled = false;
+    btnRegister.textContent = t("register_btn");
+  }
+});
+
+// Modale display name
+function showDisplayNameModal() {
+  document.getElementById("modal-display-name").style.display = "flex";
+}
+function hideDisplayNameModal() {
+  document.getElementById("modal-display-name").style.display = "none";
+}
+document.getElementById("btn-save-display-name").addEventListener("click", async () => {
+  const name = document.getElementById("modal-display-name-input").value.trim();
+  if (name) {
+    await api("POST", "/user/display-name", { displayName: name });
+    currentUser.displayName = name;
+    localStorage.setItem("mp_user", JSON.stringify(currentUser));
+  }
+  hideDisplayNameModal();
+});
+document.getElementById("btn-skip-display-name").addEventListener("click", hideDisplayNameModal);
 
 // Logout
 document.getElementById("btn-logout").addEventListener("click", logout);

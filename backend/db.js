@@ -14,6 +14,8 @@ db.exec(`
     address               TEXT    NOT NULL UNIQUE,
     encrypted_private_key TEXT,
     is_up                 INTEGER NOT NULL DEFAULT 0,
+    display_name          TEXT,
+    terms_accepted        INTEGER NOT NULL DEFAULT 0,
     created_at            INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
