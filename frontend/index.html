@@ -497,10 +497,7 @@
   </div>
   <div class="powered-by">
     <span data-i18n="powered_by">Powered by</span>
-    <img src="https://lukso.network/static/media/lukso-logo-full-light.svg"
-         onerror="this.style.display='none'; this.nextSibling.style.display='inline'"
-         alt="LUKSO">
-    <span style="display:none; font-weight:700; color:#fff;">LUKSO</span>
+    <strong style="color:#fff; margin-left:4px; font-size:13px;">LUKSO</strong>
   </div>
 </header>
 
@@ -675,8 +672,7 @@ const CONTRACT_ABI = [
   "event PrizeClaimed(uint256 indexed matchId, address indexed winner, bytes32 tokenId)"
 ];
 
-const RESULT_LABELS = { 1: t("home_win"), 2: t("draw"), 3: t("away_win") };
-
+const RESULT_LABELS = { 1: "Home", 2: "Draw", 3: "Away" };
 // ============================================================
 // i18n
 // ============================================================
@@ -770,6 +766,10 @@ function applyI18n() {
   document.querySelectorAll("[data-i18n]").forEach(el => {
     el.textContent = t(el.dataset.i18n);
   });
+  // Aggiorna RESULT_LABELS con le traduzioni corrette
+  RESULT_LABELS[1] = t("home_win");
+  RESULT_LABELS[2] = t("draw");
+  RESULT_LABELS[3] = t("away_win");
 }
 
 // ============================================================
