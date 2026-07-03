@@ -503,11 +503,9 @@ app.get("/api/groups/:inviteCode/leaderboard", requireAuth, (req, res) => {
   const group = db.prepare("SELECT * FROM groups WHERE invite_code = ?").get(req.params.inviteCode.toUpperCase());
   if (!group) return res.status(404).json({ success: false, error: "Gruppo non trovato" });
 
-  // Verifica che l'utente sia membro
   const isMember = db.prepare("SELECT id FROM group_members WHERE group_id = ? AND user_id = ?").get(group.id, req.user.userId);
   if (!isMember) return res.status(403).json({ success: false, error: "Non sei membro di questo gruppo" });
 
-  // Lista membri con i loro address (la classifica reale viene calcolata on-chain lato frontend)
   const members = db.prepare(`
     SELECT u.id, u.email, u.address, u.is_up, u.display_name, gm.joined_at
     FROM group_members gm
@@ -516,12 +514,33 @@ app.get("/api/groups/:inviteCode/leaderboard", requireAuth, (req, res) => {
     ORDER BY gm.joined_at ASC
   `).all(group.id);
 
-  // Partite escluse dal gruppo
   const excluded = db.prepare(
     "SELECT contract_match_id FROM group_excluded_matches WHERE group_id = ?"
   ).all(group.id).map(r => r.contract_match_id);
 
   res.json({ success: true, group, members, excludedMatches: excluded });
+});
+
+// GET /api/groups/:inviteCode/predictions — pronostici di tutti i membri per ogni partita
+// La classifica con i punti viene calcolata on-chain lato frontend (legge eventi PredictionMade)
+// Questo endpoint serve solo a sapere quali address sono membri, per filtrare gli eventi
+app.get("/api/groups/:inviteCode/members", requireAuth, (req, res) => {
+  const group = db.prepare("SELECT * FROM groups WHERE invite_code = ?").get(req.params.inviteCode.toUpperCase());
+  if (!group) return res.status(404).json({ success: false, error: "Gruppo non trovato" });
+
+  const isMember = db.prepare("SELECT id FROM group_members WHERE group_id = ? AND user_id = ?").get(group.id, req.user.userId);
+  if (!isMember) return res.status(403).json({ success: false, error: "Non sei membro di questo gruppo" });
+
+  const members = db.prepare(`
+    SELECT u.id, u.address, u.display_name, u.is_up,
+           (u.id = ?) as is_me
+    FROM group_members gm
+    JOIN users u ON gm.user_id = u.id
+    WHERE gm.group_id = ?
+    ORDER BY gm.joined_at ASC
+  `).all(req.user.userId, group.id);
+
+  res.json({ success: true, group, members });
 });
 
 // DELETE /api/groups/:inviteCode/leave — abbandona un gruppo

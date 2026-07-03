@@ -2,12 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link rel="icon" type="image/jpeg" href="/Lukso_400x400.jpg">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MatchPredictor — On-chain predictions powered by LUKSO</title>
 <meta property="og:title" content="MatchPredictor — On-chain predictions powered by LUKSO">
 <meta property="og:description" content="Predict match outcomes, win NFTs. Free, no wallet required. Powered by LUKSO blockchain.">
 <meta property="og:url" content="https://playmatchpredictor.chainintegrate.it">
 <meta property="og:type" content="website">
+<meta property="og:image" content="https://playmatchpredictor.chainintegrate.it/Lukso_400x400.jpg">
 <meta name="twitter:card" content="summary">
 <style>
   :root {
@@ -478,6 +480,58 @@
     margin: 4px 2px;
   }
 
+  /* ── Group member predictions ── */
+  .member-pred-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 0;
+    font-size: 12px;
+    color: var(--chalk-dim);
+  }
+  .member-name { font-weight: 600; color: var(--chalk); min-width: 80px; }
+  .member-pred { 
+    padding: 2px 10px; 
+    border-radius: 999px; 
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .member-pred.home { background: rgba(52,152,219,0.15); color: #3498db; }
+  .member-pred.draw { background: rgba(243,156,18,0.15); color: #f39c12; }
+  .member-pred.away { background: rgba(231,76,60,0.15); color: #e74c3c; }
+  .member-pred.correct { background: rgba(127,224,181,0.2); color: var(--green); }
+  .member-pred.wrong { opacity: 0.5; text-decoration: line-through; }
+  .member-pred.none { color: var(--line); font-style: italic; }
+  .members-predictions { padding: 8px 18px 14px; border-top: 1px solid var(--line); }
+
+  /* ── Floating confirm button ── */
+  .floating-confirm {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    background: var(--green);
+    color: var(--bg);
+    border: none;
+    border-radius: 999px;
+    padding: 14px 28px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    transition: opacity 0.15s, transform 0.15s;
+    white-space: nowrap;
+  }
+  .floating-confirm:hover { opacity: 0.9; }
+  .floating-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .pred-btn.pending {
+    background: rgba(127,224,181,0.2);
+    border-color: var(--green);
+    color: var(--green);
+  }
+
   @media (max-width: 480px) {
     .match-body { padding: 16px 12px; }
     .team { font-size: 14px; }
@@ -497,18 +551,23 @@
   </div>
   <div class="powered-by">
     <span data-i18n="powered_by">Powered by</span>
-    <strong style="color:#fff; margin-left:4px; font-size:13px;">LUKSO</strong>
+    <img src="/Lukso_400x400.jpg" style="height:80px; width:80px; border-radius:50%; margin-left:6px; vertical-align:middle;" alt="LUKSO">
   </div>
 </header>
 
 <div class="user-bar" id="user-bar" style="display:none;">
   <div class="user-info">
     <span>👤</span>
-    <span class="user-email" id="user-email"></span>
+    <div>
+      <span class="user-email" id="user-email"></span>
+      <span id="user-display-name" style="color:var(--green); font-weight:700; margin-left:8px; font-size:13px;"></span>
+    </div>
     <span class="user-address" id="user-address"></span>
   </div>
-  <button class="btn-ghost btn-sm" id="btn-edit-name" onclick="document.getElementById('modal-display-name').style.display='flex'">✏️ Name</button>
-  <button class="btn-ghost btn-sm" id="btn-logout" data-i18n="logout">Logout</button>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <button class="btn-ghost btn-sm" id="btn-edit-name" onclick="document.getElementById('modal-display-name').style.display='flex'" title="Edit display name">✏️</button>
+    <button class="btn-ghost btn-sm" id="btn-logout" data-i18n="logout">Logout</button>
+  </div>
 </div>
 
 <nav id="main-nav" style="display:none;">
@@ -636,26 +695,43 @@
       <div class="status" id="create-status" style="display:none; padding: 12px 0;"></div>
     </div>
 
-    <!-- Vista classifica gruppo selezionato -->
+    <!-- Vista gruppo selezionato -->
     <div id="group-detail" style="display:none;">
-      <div style="display:flex; align-items:center; gap:10px; margin-bottom: 20px;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom: 20px; flex-wrap:wrap;">
         <button class="btn-ghost btn-sm" id="btn-back-groups">← Back</button>
-        <div>
+        <div style="flex:1;">
           <div style="font-weight:700; font-size:18px;" id="group-detail-name"></div>
           <div style="font-size:12px; color:var(--chalk-dim);" id="group-detail-meta"></div>
         </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn-ghost btn-sm" id="btn-share-group" data-i18n="share_invite">Share invite link</button>
+          <button class="btn-ghost btn-sm" style="color:var(--red);" id="btn-leave-group" data-i18n="leave_group">Leave group</button>
+        </div>
       </div>
+
+      <!-- Classifica gruppo -->
       <div class="section-title" data-i18n="group_leaderboard">Group Leaderboard</div>
       <div class="leaderboard-card" id="group-leaderboard-list"></div>
-      <div style="margin-top:16px; text-align:right;">
-        <button class="btn-ghost btn-sm" id="btn-share-group" data-i18n="share_invite">Share invite link</button>
-        <button class="btn-ghost btn-sm" style="color:var(--red);" id="btn-leave-group" data-i18n="leave_group">Leave group</button>
+
+      <!-- Partite del gruppo con pronostici dei membri -->
+      <div class="section-title" style="margin-top:24px;">
+        <span data-i18n="group_matches">Group Matches</span>
       </div>
+      <div class="toggle-bar" style="margin-bottom:16px;">
+        <button class="toggle-btn active" data-group-filter="upcoming" data-i18n="upcoming">Upcoming</button>
+        <button class="toggle-btn" data-group-filter="played" data-i18n="played">Played</button>
+      </div>
+      <div id="group-matches-list"></div>
     </div>
 
   </div>
 
 </main>
+
+<!-- Floating confirm button -->
+<button class="floating-confirm" id="floating-confirm-btn" style="display:none;">
+  ✓ Confirm <span id="floating-confirm-count">0</span> predictions
+</button>
 
 <!-- Modale display name -->
 <div id="modal-display-name" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); z-index:100; align-items:center; justify-content:center;">
@@ -721,8 +797,6 @@ const strings = {
     terms_accept: "I confirm this is an entertainment platform with no monetary prizes. I accept the",
     terms_link: "Terms of Service",
     send_link: "Send magic link",
-    toggle_login: "Login", toggle_register: "Register",
-    register_btn: "Create account",
     link_sent_title: "Check your email!",
     link_sent_sub: "We sent a magic link. Click it to log in. Valid for 15 minutes.",
     upcoming: "Upcoming", played: "Played",
@@ -735,6 +809,8 @@ const strings = {
     create_group_title: "New group", create_btn: "Create group",
     group_leaderboard: "Group Leaderboard",
     share_invite: "Share invite link", leave_group: "Leave group",
+    group_matches: "Group Matches",
+    no_pred: "—",
     footer_entertainment: "Entertainment only · No gambling · No profit",
     footer_privacy: "Privacy Policy", footer_terms: "Terms of Service",
     no_matches: "No matches found.", loading: "Loading…",
@@ -744,6 +820,7 @@ const strings = {
     claim_nft: "Claim your NFT", already_claimed: "NFT claimed ✓",
     connect_to_predict: "Log in to make predictions.",
     wins: "wins", win: "win",
+    no_pred: "—",
     no_groups: "You're not in any groups yet.",
     group_created: "Group created!", group_joined: "You joined the group!",
     invite_copied: "Invite link copied!",
@@ -776,6 +853,8 @@ const strings = {
     create_group_title: "Nuovo gruppo", create_btn: "Crea gruppo",
     group_leaderboard: "Classifica del Gruppo",
     share_invite: "Condividi link invito", leave_group: "Abbandona gruppo",
+    group_matches: "Partite del gruppo",
+    no_pred: "—",
     footer_entertainment: "Solo intrattenimento · Nessun gioco d'azzardo · Nessun profitto",
     footer_privacy: "Privacy Policy", footer_terms: "Termini di Servizio",
     no_matches: "Nessuna partita trovata.", loading: "Caricamento…",
@@ -785,6 +864,7 @@ const strings = {
     claim_nft: "Riscatta il tuo NFT", already_claimed: "NFT riscattato ✓",
     connect_to_predict: "Accedi per fare pronostici.",
     wins: "vittorie", win: "vittoria",
+    no_pred: "—",
     no_groups: "Non sei ancora in nessun gruppo.",
     group_created: "Gruppo creato!", group_joined: "Sei entrato nel gruppo!",
     invite_copied: "Link invito copiato!",
@@ -816,6 +896,7 @@ let onChainMatches = [];
 let readContract = null;
 let ethersLib = null;
 let currentGroupCode = null;
+const pendingPredictions = new Map(); // matchId → predictedResult (pending, non ancora inviati)
 
 // ============================================================
 // API HELPERS
@@ -1166,25 +1247,26 @@ function buildMatchCard(m, extra, myPred, claimed) {
 
   const row = document.createElement("div");
   row.className = "pred-row";
+  const pending = pendingPredictions.get(m.id);
 
   [1, 2, 3].forEach(code => {
     const btn = document.createElement("button");
-    btn.className = "pred-btn" + (myPred === code ? " selected" : "");
+    let cls = "pred-btn";
+    if (myPred === code) cls += " selected";
+    else if (pending === code) cls += " pending";
+    btn.className = cls;
     btn.textContent = RESULT_LABELS[code];
-    btn.disabled = myPred !== 0;
+    btn.disabled = myPred !== 0; // disabilita solo se già inviato on-chain
 
     if (myPred === 0) {
-      btn.onclick = async () => {
-        row.querySelectorAll("button").forEach(b => b.disabled = true);
-        try {
-          const res = await api("POST", "/predict", { matchId: m.id, predictedResult: code });
-          if (res.success) {
-            btn.className = "pred-btn selected";
-          } else {
-            row.querySelectorAll("button").forEach(b => b.disabled = false);
-            alert(res.error);
-          }
-        } catch { row.querySelectorAll("button").forEach(b => b.disabled = false); }
+      btn.onclick = () => {
+        // Rimuovi pending precedente per questa partita
+        pendingPredictions.set(m.id, code);
+        // Aggiorna stile bottoni della riga
+        row.querySelectorAll(".pred-btn").forEach((b, i) => {
+          b.className = "pred-btn" + (i + 1 === code ? " pending" : "");
+        });
+        updateFloatingConfirm();
       };
     }
     row.appendChild(btn);
@@ -1286,13 +1368,27 @@ async function renderLeaderboard(addresses, containerId, userAddr) {
     return;
   }
 
+  // Recupera display names dal backend
+  let displayNames = {};
+  try {
+    const addrsParam = ranked.map(([addr]) => addr).join(",");
+    const dnRes = await api("GET", `/users/display-names?addresses=${addrsParam}`, null, false);
+    if (dnRes.success) displayNames = dnRes.data;
+  } catch {}
+  // Per gruppi: usa display_name passati direttamente
+  if (addresses && addresses.displayNames) {
+    displayNames = { ...displayNames, ...addresses.displayNames };
+  }
+
   container.innerHTML = "";
   ranked.forEach(([addr, count], i) => {
     const row = document.createElement("div");
     row.className = "leaderboard-row" + (addr === userAddr?.toLowerCase() ? " me" : "");
+    const displayName = displayNames[addr] || null;
     row.innerHTML = `
       <span class="rank ${i < 3 ? "gold" : ""}">${i + 1}</span>
       <div style="flex:1;">
+        ${displayName ? `<div class="lb-name">${displayName}</div>` : ""}
         <div class="lb-addr">${addr.slice(0, 8)}…${addr.slice(-6)}</div>
       </div>
       <span class="lb-wins">${count} ${count === 1 ? t("win") : t("wins")}</span>
@@ -1346,11 +1442,170 @@ async function showGroupDetail(code, name, memberCount) {
   document.querySelectorAll("#tab-groups .form-card").forEach(el => el.style.display = "none");
   document.getElementById("group-detail").style.display = "block";
 
-  // Carica classifica del gruppo
-  const res = await api("GET", `/groups/${code}/leaderboard`);
-  if (res.success) {
-    const addresses = res.members.map(m => m.address.toLowerCase());
-    await renderLeaderboard(addresses, "group-leaderboard-list", currentUser?.address);
+  // Carica membri del gruppo
+  const res = await api("GET", `/groups/${code}/members`);
+  if (!res.success) return;
+
+  const members = res.members;
+  const displayNames = {};
+  members.forEach(m => {
+    if (m.display_name) displayNames[m.address.toLowerCase()] = m.display_name;
+  });
+
+  // Classifica: tutti i membri con punti (calcolati on-chain)
+  const addresses = members.map(m => m.address.toLowerCase());
+  addresses.displayNames = displayNames;
+  await renderGroupLeaderboard(members, "group-leaderboard-list", currentUser?.address);
+
+  // Partite con pronostici dei membri
+  await renderGroupMatches(members, "upcoming");
+}
+
+async function renderGroupLeaderboard(members, containerId, userAddr) {
+  await initEthers();
+  const container = document.getElementById(containerId);
+  container.innerHTML = `<div class="status">${t("loading")}</div>`;
+
+  const nextId = await readContract.nextMatchId();
+  const total = Number(nextId);
+
+  // Inizializza tutti i membri con 0 vittorie
+  const winsMap = new Map();
+  members.forEach(m => winsMap.set(m.address.toLowerCase(), 0));
+
+  // Conta vittorie on-chain per ogni membro
+  for (let i = 0; i < total; i++) {
+    try {
+      const m = await readContract.getMatch(i);
+      if (!m.resolved) continue;
+      const actual = Number(m.actualResult);
+      for (const member of members) {
+        const pred = Number(await readContract.predictions(i, member.address));
+        if (pred === actual) {
+          winsMap.set(member.address.toLowerCase(), (winsMap.get(member.address.toLowerCase()) || 0) + 1);
+        }
+      }
+    } catch {}
+  }
+
+  // Ordina per vittorie decrescenti
+  const ranked = [...winsMap.entries()].sort((a, b) => b[1] - a[1]);
+
+  container.innerHTML = "";
+  ranked.forEach(([addr, count], i) => {
+    const member = members.find(m => m.address.toLowerCase() === addr);
+    const displayName = member?.display_name || null;
+    const isMe = addr === userAddr?.toLowerCase();
+    const row = document.createElement("div");
+    row.className = "leaderboard-row" + (isMe ? " me" : "");
+    row.innerHTML = `
+      <span class="rank ${i < 3 ? "gold" : ""}">${i + 1}</span>
+      <div style="flex:1;">
+        ${displayName ? `<div class="lb-name">${displayName}</div>` : ""}
+        <div class="lb-addr">${addr.slice(0, 8)}…${addr.slice(-6)}</div>
+      </div>
+      <span class="lb-wins">${count} ${count === 1 ? t("win") : t("wins")}</span>
+    `;
+    container.appendChild(row);
+  });
+}
+
+async function renderGroupMatches(members, filter) {
+  await initEthers();
+  const container = document.getElementById("group-matches-list");
+  container.innerHTML = `<div class="status">${t("loading")}</div>`;
+
+  const dataRes = await api("GET", "/matches-data", null, false);
+  const md = dataRes.data || { matches: [] };
+  const nextId = Number(await readContract.nextMatchId());
+  const now = Date.now();
+
+  // Carica tutte le partite on-chain
+  const allMatches = [];
+  for (let i = 0; i < nextId; i++) {
+    try {
+      const m = await readContract.getMatch(i);
+      allMatches.push({ id: i, teamHome: m.teamHome, teamAway: m.teamAway,
+        predictionDeadline: m.predictionDeadline, resolved: m.resolved,
+        actualResult: m.actualResult, exists: m.exists });
+    } catch {}
+  }
+
+  // Filtra
+  const filtered = allMatches.filter(m => {
+    const deadline = Number(m.predictionDeadline) * 1000;
+    if (filter === "upcoming") return !m.resolved && now < deadline;
+    if (filter === "played") return m.resolved || now >= deadline;
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    container.innerHTML = `<div class="status">${t("no_matches")}</div>`;
+    return;
+  }
+
+  // Carica i pronostici di tutti i membri per tutte le partite
+  const memberPreds = {}; // address → { matchId → result }
+  for (const member of members) {
+    memberPreds[member.address.toLowerCase()] = {};
+    for (const m of filtered) {
+      try {
+        const pred = Number(await readContract.predictions(m.id, member.address));
+        memberPreds[member.address.toLowerCase()][m.id] = pred;
+      } catch {}
+    }
+  }
+
+  // Pronostici dell'utente corrente per i bottoni
+  const myPreds = memberPreds[currentUser?.address?.toLowerCase()] || {};
+  const myClaims = {};
+  if (currentUser) {
+    for (const m of filtered) {
+      try { myClaims[m.id] = await readContract.claimed(m.id, currentUser.address); } catch {}
+    }
+  }
+
+  container.innerHTML = "";
+  const RESULT_NAMES = {
+    1: lang === "it" ? "Casa" : "Home",
+    2: lang === "it" ? "Pareggio" : "Draw",
+    3: lang === "it" ? "Ospite" : "Away"
+  };
+  const PRED_CLASS = { 1: "home", 2: "draw", 3: "away" };
+
+  for (const m of filtered) {
+    const extra = md.matches.find(x => x.contractMatchId === m.id) || {};
+    const card = buildMatchCard(m, extra, myPreds[m.id] || 0, myClaims[m.id] || false);
+
+    // Aggiungi sezione pronostici dei membri
+    const membersDiv = document.createElement("div");
+    membersDiv.className = "members-predictions";
+
+    members.forEach(member => {
+      const addr = member.address.toLowerCase();
+      const pred = memberPreds[addr]?.[m.id] || 0;
+      const isMe = addr === currentUser?.address?.toLowerCase();
+      const displayName = member.display_name || addr.slice(0, 6) + "…" + addr.slice(-4);
+      const actual = m.resolved ? Number(m.actualResult) : null;
+
+      let predClass = pred === 0 ? "none" : PRED_CLASS[pred];
+      if (m.resolved && pred !== 0) {
+        predClass = pred === actual ? "correct" : "wrong";
+      }
+
+      const row = document.createElement("div");
+      row.className = "member-pred-row";
+      row.innerHTML = `
+        <span class="member-name">${isMe ? "👤 " : ""}${displayName}</span>
+        <span class="member-pred ${predClass}">
+          ${pred === 0 ? t("no_pred") : RESULT_NAMES[pred]}
+        </span>
+      `;
+      membersDiv.appendChild(row);
+    });
+
+    card.appendChild(membersDiv);
+    container.appendChild(card);
   }
 }
 
@@ -1380,7 +1635,7 @@ function showTab(tabName) {
     btn.classList.toggle("active", btn.dataset.tab === tabName);
   });
 
-  if (tabName === "matches") renderMatches(document.querySelector("#tab-matches .toggle-btn.active")?.dataset?.matchFilter || "upcoming");
+  if (tabName === "matches") renderMatches(document.querySelector(".toggle-btn.active")?.dataset?.matchFilter || "upcoming");
   if (tabName === "my-predictions") renderMyPredictions();
   if (tabName === "leaderboard") renderLeaderboard(null, "leaderboard-list", currentUser?.address);
   if (tabName === "groups") {
@@ -1408,6 +1663,19 @@ async function init() {
     document.getElementById("user-email").textContent = currentUser.email;
     document.getElementById("user-address").textContent =
       currentUser.address.slice(0, 8) + "…" + currentUser.address.slice(-6);
+    if (currentUser.displayName) {
+      document.getElementById("user-display-name").textContent = currentUser.displayName;
+    }
+
+    // Aggiorna profilo dal backend (per avere display_name aggiornato)
+    try {
+      const profileRes = await api("GET", "/user/profile");
+      if (profileRes.success && profileRes.user.display_name) {
+        currentUser.displayName = profileRes.user.display_name;
+        localStorage.setItem("mp_user", JSON.stringify(currentUser));
+        document.getElementById("user-display-name").textContent = profileRes.user.display_name;
+      }
+    } catch {}
 
     // Carica matches-data
     try {
@@ -1424,14 +1692,85 @@ async function init() {
     } else {
       showTab("matches");
     }
-    if (loggedViaLink && !currentUser.displayName) {
-      setTimeout(showDisplayNameModal, 800);
-    }
   } else {
     showTab("login");
   }
 
   await handleJoinRedirect();
+}
+
+// ============================================================
+// FLOATING CONFIRM — pronostici batch
+// ============================================================
+function updateFloatingConfirm() {
+  const btn = document.getElementById("floating-confirm-btn");
+  const count = pendingPredictions.size;
+  if (count === 0) {
+    btn.style.display = "none";
+  } else {
+    btn.style.display = "block";
+    const lang_it = navigator.language?.startsWith("it");
+    document.getElementById("floating-confirm-count").textContent = count;
+    btn.childNodes[0].textContent = lang_it
+      ? `✓ Conferma `
+      : `✓ Confirm `;
+    btn.lastChild.textContent = lang_it
+      ? ` pronostic${count === 1 ? "o" : "i"}`
+      : ` prediction${count === 1 ? "" : "s"}`;
+  }
+}
+
+async function confirmPredictions() {
+  const btn = document.getElementById("floating-confirm-btn");
+  if (pendingPredictions.size === 0) return;
+
+  btn.disabled = true;
+  document.body.style.opacity = "0.5";
+  document.body.style.pointerEvents = "none";
+  const matchIds = [...pendingPredictions.keys()];
+  const results = [...pendingPredictions.values()];
+
+  try {
+    const res = matchIds.length === 1
+      ? await api("POST", "/predict", { matchId: matchIds[0], predictedResult: results[0] })
+      : await api("POST", "/predict/batch", { predictions: matchIds.map((id, i) => ({ matchId: id, predictedResult: results[i] })) });
+
+    if (res.success) {
+      // Aggiorna visivamente: pending → selected
+      pendingPredictions.forEach((code, matchId) => {
+        const rows = document.querySelectorAll(".pred-row");
+        rows.forEach(row => {
+          const btns = row.querySelectorAll(".pred-btn");
+          // Cerca la riga corrispondente al matchId
+          // (i bottoni pending diventano selected)
+          btns.forEach((b, i) => {
+            if (b.classList.contains("pending")) {
+              b.className = "pred-btn selected";
+              b.disabled = true;
+            } else {
+              b.disabled = true;
+            }
+          });
+        });
+      });
+      pendingPredictions.clear();
+      updateFloatingConfirm();
+      // Ricarica le partite per aggiornare lo stato corretto
+      setTimeout(() => renderMatches("upcoming"), 1000);
+      document.body.style.opacity = "";
+      document.body.style.pointerEvents = "";
+    } else {
+      alert(res.error || "Error sending predictions");
+      document.body.style.opacity = "";
+      document.body.style.pointerEvents = "";
+      btn.disabled = false;
+    }
+  } catch (err) {
+    alert("Error: " + err.message);
+    document.body.style.opacity = "";
+      document.body.style.pointerEvents = "";
+      btn.disabled = false;
+  }
 }
 
 // ============================================================
@@ -1552,7 +1891,8 @@ document.querySelectorAll(".nav-tab").forEach(btn => {
 // Match filter toggle
 document.querySelectorAll(".toggle-btn").forEach(btn => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".toggle-btn").forEach(b => b.classList.remove("active"));
+    if (!btn.dataset.matchFilter) return; // ignora il toggle login/register
+    document.querySelectorAll("#tab-matches .toggle-btn").forEach(b => b.classList.remove("active"));
     btn.classList.add("active");
     renderMatches(btn.dataset.matchFilter);
   });
@@ -1588,6 +1928,18 @@ document.getElementById("btn-create-group").addEventListener("click", async () =
 // Groups: back
 document.getElementById("btn-back-groups").addEventListener("click", () => {
   showTab("groups");
+});
+
+// Toggle filtro partite nel gruppo
+document.querySelectorAll("[data-group-filter]").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    document.querySelectorAll("[data-group-filter]").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    if (currentGroupCode) {
+      const res = await api("GET", `/groups/${currentGroupCode}/members`);
+      if (res.success) await renderGroupMatches(res.members, btn.dataset.groupFilter);
+    }
+  });
 });
 
 // Groups: share invite
