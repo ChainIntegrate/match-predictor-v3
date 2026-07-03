@@ -939,7 +939,7 @@ async function loadMatchesFromChain() {
   for (let i = 0; i < total; i++) {
     try {
       const m = await readContract.getMatch(i);
-      results.push({ id: i, ...m });
+      results.push({ id: i, teamHome: m.teamHome, teamAway: m.teamAway, predictionDeadline: m.predictionDeadline, resolved: m.resolved, actualResult: m.actualResult, exists: m.exists });
     } catch {}
   }
   return results;
@@ -1380,7 +1380,7 @@ function showTab(tabName) {
     btn.classList.toggle("active", btn.dataset.tab === tabName);
   });
 
-  if (tabName === "matches") renderMatches(document.querySelector(".toggle-btn.active")?.dataset?.matchFilter || "upcoming");
+  if (tabName === "matches") renderMatches(document.querySelector("#tab-matches .toggle-btn.active")?.dataset?.matchFilter || "upcoming");
   if (tabName === "my-predictions") renderMyPredictions();
   if (tabName === "leaderboard") renderLeaderboard(null, "leaderboard-list", currentUser?.address);
   if (tabName === "groups") {

@@ -3,3 +3,4 @@ matchpredictor.db
 matchpredictor.db-shm
 matchpredictor.db-wal
 node_modules/
+matches-data.json
