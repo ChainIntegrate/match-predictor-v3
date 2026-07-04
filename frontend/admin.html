@@ -286,6 +286,29 @@
     <div class="result" id="metadata-result"></div>
   </div>
 
+  <!-- SEZIONE 4B: Set metadata per singolo token (con dati partita) -->
+  <div class="card full">
+    <h2>🖼️ Set token metadata (LSP4 per NFT, con dati partita)</h2>
+    <p style="color: var(--dim); font-size: 12px; line-height: 1.6; margin-bottom: 12px;">
+      Rilegge gli NFT già assegnati (evento PrizeClaimed), controlla quali non hanno ancora
+      la vera LSP4Metadata impostata, e per ciascuno costruisce un JSON che include i dati
+      della partita (squadre, risultato, matchId) come attributes. Una sola firma imposta
+      i metadata su tutti i token in sospeso in un'unica transazione.
+    </p>
+    <label>Immagine token (IPFS CID — stessa per tutti i token, come in v1)</label>
+    <input type="text" id="token-image-cid" value="bafkreig2l2qtt5nqt4277opz23oa5e7rfxiyio4zsrdybibsuvkmeegxj4" placeholder="bafkrei...">
+    <div style="font-size:11px; color:var(--dim); margin-top:4px;">750×750, hash già calcolato automaticamente qui sotto (stesso dell'icona di collezione).</div>
+
+    <button class="btn-primary btn-full" id="btn-scan-tokens" style="margin-top:12px;">Scan minted tokens</button>
+
+    <div class="match-list" id="token-list" style="display:none; margin-top:12px;"></div>
+
+    <button class="btn-success btn-full" id="btn-set-token-metadata" style="margin-top:12px;" disabled>
+      Generate &amp; set metadata for pending tokens
+    </button>
+    <div class="result" id="token-metadata-result"></div>
+  </div>
+
   <!-- SEZIONE 5: Test funzioni sponsor/oracle -->
   <div class="card full">
     <h2>🧪 Test sponsor / oracle functions</h2>
@@ -360,11 +383,16 @@
     "function reportResult(uint256 matchId, uint8 actualResult) external",
     "function claimFor(uint256 matchId, address winner) external",
     "function setData(bytes32 dataKey, bytes dataValue) external",
+    "function getDataForTokenId(bytes32 tokenId, bytes32 dataKey) external view returns (bytes)",
+    "function setDataBatchForTokenIds(bytes32[] tokenIds, bytes32[] dataKeys, bytes[] dataValues) external",
     "function owner() external view returns (address)",
     "function getMatch(uint256 matchId) external view returns (tuple(string teamHome, string teamAway, uint256 predictionDeadline, bool resolved, uint8 actualResult, bool exists))",
     "event MatchCreated(uint256 indexed matchId, string teamHome, string teamAway, uint256 predictionDeadline)",
     "event PrizeClaimed(uint256 indexed matchId, address indexed winner, bytes32 tokenId)"
   ];
+
+  const LSP4_METADATA_KEY = "0x9afb95cacc9f95858ec44aa8c3b685511002e30ae54415823f406128b85b238e";
+  const RESULT_NAMES = { 1: "Home Win", 2: "Draw", 3: "Away Win" };
 
   // ============================================================
   // STATE
@@ -719,6 +747,196 @@
     } finally {
       btn.disabled = false;
       btn.textContent = "Set metadata on-chain";
+    }
+  });
+
+  // ============================================================
+  // SET TOKEN METADATA (per-NFT, con dati partita)
+  // ============================================================
+  let pendingTokens = []; // { tokenId, matchId, winner, teamHome, teamAway, actualResult, hasMetadata }
+
+  function pinJsonEndpoint() {
+    // Deriva l'URL di /api/admin/pin-json dallo stesso backend già configurato
+    // per /api/matches-data, invece di duplicare un secondo campo URL in UI.
+    return document.getElementById("backend-url").value.replace(/\/matches-data\/?$/, "/admin/pin-json");
+  }
+
+  document.getElementById("btn-scan-tokens").addEventListener("click", async () => {
+    if (!readContract) { alert("Connetti prima la UP."); return; }
+
+    const btn = document.getElementById("btn-scan-tokens");
+    const listEl = document.getElementById("token-list");
+    btn.disabled = true;
+    btn.textContent = "Scanning…";
+    listEl.style.display = "none";
+    listEl.innerHTML = "";
+
+    try {
+      const events = await readContract.queryFilter(readContract.filters.PrizeClaimed());
+      const matchCache = {};
+      pendingTokens = [];
+
+      for (const ev of events) {
+        const matchId = Number(ev.args.matchId);
+        const winner = ev.args.winner;
+        const tokenId = ev.args.tokenId;
+
+        const existing = await readContract.getDataForTokenId(tokenId, LSP4_METADATA_KEY);
+        const hasMetadata = existing && existing !== "0x";
+
+        if (!matchCache[matchId]) {
+          matchCache[matchId] = await readContract.getMatch(matchId);
+        }
+        const m = matchCache[matchId];
+
+        pendingTokens.push({
+          tokenId, matchId, winner,
+          teamHome: m.teamHome, teamAway: m.teamAway,
+          actualResult: Number(m.actualResult),
+          hasMetadata
+        });
+      }
+
+      renderTokenList();
+      listEl.style.display = "block";
+    } catch (err) {
+      alert("Errore scan: " + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Scan minted tokens";
+    }
+  });
+
+  function renderTokenList() {
+    const listEl = document.getElementById("token-list");
+    const pending = pendingTokens.filter(t => !t.hasMetadata);
+    listEl.innerHTML = `<div class="select-all-bar">${pendingTokens.length} token trovati · ${pending.length} senza LSP4Metadata</div>`;
+
+    pendingTokens.forEach(t => {
+      const div = document.createElement("div");
+      div.className = "match-item";
+      div.style.cursor = "default";
+      div.innerHTML = `
+        <span class="badge ${t.hasMetadata ? 'badge-ok' : 'badge-warn'}">${t.hasMetadata ? 'OK' : 'MANCA'}</span>
+        <div class="teams">#${t.matchId} — ${t.teamHome} vs ${t.teamAway} (${RESULT_NAMES[t.actualResult] || t.actualResult})</div>
+        <div class="meta">${t.winner.slice(0, 6)}…${t.winner.slice(-4)}</div>
+      `;
+      listEl.appendChild(div);
+    });
+
+    document.getElementById("btn-set-token-metadata").disabled = pending.length === 0 || !contract;
+  }
+
+  document.getElementById("btn-set-token-metadata").addEventListener("click", async () => {
+    if (!signer || !contract) { alert("Connetti prima la UP."); return; }
+
+    const imageCid = document.getElementById("token-image-cid").value.trim();
+    if (!imageCid) { alert("Inserisci il CID dell'immagine (anche placeholder, per ora)."); return; }
+
+    const pending = pendingTokens.filter(t => !t.hasMetadata);
+    if (pending.length === 0) return;
+
+    const btn = document.getElementById("btn-set-token-metadata");
+    const resultEl = document.getElementById("token-metadata-result");
+    btn.disabled = true;
+    resultEl.className = "result";
+
+    try {
+      const { ethers } = await import("https://cdn.jsdelivr.net/npm/ethers@6.13.4/+esm");
+      const { ERC725 } = await import("https://cdn.jsdelivr.net/npm/@erc725/erc725.js@0.28.2/+esm");
+      const lsp4Schema = [{
+        name: "LSP4Metadata",
+        key: LSP4_METADATA_KEY,
+        keyType: "Singleton",
+        valueType: "bytes",
+        valueContent: "VerifiableURI"
+      }];
+
+      // Calcola hash e dimensioni reali dell'immagine una sola volta (è la stessa
+      // per tutti i token, come in v1) invece di richiederli manualmente in UI.
+      resultEl.textContent = "Verifico l'immagine…";
+      const imgUrl = `${CONFIG.IPFS_GATEWAY}${imageCid}`;
+      const imgResponse = await fetch(imgUrl);
+      if (!imgResponse.ok) throw new Error(`Impossibile scaricare l'immagine (${imgResponse.status})`);
+      const imgBuffer = await imgResponse.arrayBuffer();
+      const imageHash = ethers.keccak256(new Uint8Array(imgBuffer));
+      const { width: imageWidth, height: imageHeight } = await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        img.onerror = () => reject(new Error("Immagine non valida"));
+        img.src = imgUrl;
+      });
+
+      // Un'unica firma (no gas) autorizza il pinning di tutti i JSON in sospeso,
+      // così non serve un popup della UP per ogni singola partita.
+      resultEl.textContent = "Confirm signature in your UP extension…";
+      const timestamp = Date.now();
+      const message = `MatchPredictor admin update - ${timestamp}`;
+      const signature = await signer.signMessage(message);
+      const pinEndpoint = pinJsonEndpoint();
+
+      const tokenIds = [];
+      const dataKeys = [];
+      const dataValues = [];
+
+      for (let i = 0; i < pending.length; i++) {
+        const t = pending[i];
+        resultEl.textContent = `Pinning metadata ${i + 1}/${pending.length} (match #${t.matchId})…`;
+
+        // I dati della partita entrano qui, negli attributes — questo è il punto
+        // richiesto: ogni token porta con sé squadre, risultato e matchId.
+        // L'immagine è la stessa per tutti i token (come in v1) — cambia solo il testo.
+        const json = {
+          LSP4Metadata: {
+            name: `MatchPredictor Winner — ${t.teamHome} vs ${t.teamAway}`,
+            description: `Premio per il pronostico corretto su ${t.teamHome} vs ${t.teamAway} (FIFA World Cup 2026).`,
+            links: [{ title: "Play MatchPredictor", url: "https://playmatchpredictor.chainintegrate.it" }],
+            icon: [{ width: imageWidth, height: imageHeight, url: `ipfs://${imageCid}`, verification: { method: "keccak256(bytes)", data: imageHash } }],
+            images: [[{ width: imageWidth, height: imageHeight, url: `ipfs://${imageCid}`, verification: { method: "keccak256(bytes)", data: imageHash } }]],
+            assets: [],
+            attributes: [
+              { key: "Match ID", value: t.matchId, type: "number" },
+              { key: "Home Team", value: t.teamHome, type: "string" },
+              { key: "Away Team", value: t.teamAway, type: "string" },
+              { key: "Result", value: RESULT_NAMES[t.actualResult] || String(t.actualResult), type: "string" },
+              { key: "Competition", value: "FIFA World Cup 2026", type: "string" }
+            ]
+          }
+        };
+
+        const pinRes = await fetch(pinEndpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message, signature, json, name: `match-${t.matchId}-${t.tokenId}.json` })
+        });
+        const pinPayload = await pinRes.json();
+        if (!pinPayload.success) throw new Error(`Pin match #${t.matchId}: ${pinPayload.error}`);
+
+        const encoded = ERC725.encodeData([{
+          keyName: "LSP4Metadata",
+          value: { json, url: `ipfs://${pinPayload.cid}` }
+        }], lsp4Schema);
+
+        tokenIds.push(t.tokenId);
+        dataKeys.push(encoded.keys[0]);
+        dataValues.push(encoded.values[0]);
+      }
+
+      resultEl.textContent = `Confirm in your UP extension… (${tokenIds.length} token in un'unica transazione)`;
+      const tx = await contract.setDataBatchForTokenIds(tokenIds, dataKeys, dataValues);
+      resultEl.textContent = "Waiting for confirmation…";
+      await tx.wait();
+
+      resultEl.textContent = `✅ Metadata impostata su ${tokenIds.length} token.\nTx: ${tx.hash}`;
+      resultEl.className = "result ok";
+
+      pending.forEach(t => t.hasMetadata = true);
+      renderTokenList();
+    } catch (err) {
+      resultEl.textContent = "❌ " + err.message;
+      resultEl.className = "result err";
+    } finally {
+      btn.disabled = false;
     }
   });
 
