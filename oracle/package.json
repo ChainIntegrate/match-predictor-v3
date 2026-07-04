@@ -1,0 +1,15 @@
+{
+  "name": "matchpredictor-v3-oracle",
+  "version": "1.0.0",
+  "description": "Script cron: reporta risultati e assegna premi per MatchPredictor v3",
+  "main": "reportResultBatch.js",
+  "scripts": {
+    "start": "node reportResultBatch.js"
+  },
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "ethers": "^6.17.0"
+  }
+}
