@@ -395,6 +395,67 @@
 
   .form-card h3 { font-size: 14px; font-weight: 700; margin-bottom: 14px; color: var(--green); text-transform: uppercase; letter-spacing: 0.08em; }
 
+  .match-select-list {
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    margin: 12px 0;
+  }
+  .match-select-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+    font-size: 12px;
+    color: var(--chalk-dim);
+    background: var(--bg-mid);
+  }
+  .match-select-bar input { width: auto; }
+  .match-select-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+  }
+  .match-select-item:last-child { border-bottom: none; }
+  .match-select-item input[type=checkbox] { width: auto; flex-shrink: 0; cursor: pointer; }
+  .match-select-item .teams { flex: 1; font-size: 13px; }
+  .match-select-item .meta { font-size: 11px; color: var(--chalk-dim); text-align: right; }
+
+  #manage-matches-panel {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.65);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  #manage-matches-panel .form-card {
+    max-width: 480px;
+    width: 100%;
+    max-height: 82vh;
+    overflow-y: auto;
+    position: relative;
+    margin: 0;
+  }
+  #manage-matches-panel .modal-close {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    background: none;
+    border: none;
+    color: var(--chalk-dim);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px;
+  }
+  #manage-matches-panel .modal-close:hover { color: var(--chalk); }
+
   input.field {
     width: 100%;
     background: var(--bg);
@@ -698,6 +759,19 @@
       <h3 data-i18n="create_group_title">New group</h3>
       <input type="text" class="field" id="group-name" placeholder="Group name" maxlength="50">
       <input type="text" class="field" id="group-desc" placeholder="Description (optional)" maxlength="200">
+
+      <div style="margin-top:14px; font-size:12px; color:var(--chalk-dim);" data-i18n="select_matches_label">
+        Select which matches count for this group
+      </div>
+      <div class="match-select-list" id="create-group-match-list">
+        <div class="match-select-bar">
+          <input type="checkbox" id="create-group-select-all" checked>
+          <label for="create-group-select-all" style="margin:0; cursor:pointer;" data-i18n="select_all">Select all</label>
+          <span id="create-group-selected-count" style="margin-left:auto;"></span>
+        </div>
+        <div id="create-group-match-items"></div>
+      </div>
+
       <button class="btn-primary" id="btn-create-group" data-i18n="create_btn">Create group</button>
       <div class="status" id="create-status" style="display:none; padding: 12px 0;"></div>
     </div>
@@ -710,9 +784,29 @@
           <div style="font-weight:700; font-size:18px;" id="group-detail-name"></div>
           <div style="font-size:12px; color:var(--chalk-dim);" id="group-detail-meta"></div>
         </div>
-        <div style="display:flex; gap:8px;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button class="btn-ghost btn-sm" id="btn-share-group" data-i18n="share_invite">Share invite link</button>
+          <button class="btn-ghost btn-sm" id="btn-manage-matches" data-i18n="manage_matches" style="display:none;">Manage matches</button>
+          <button class="btn-ghost btn-sm" style="color:var(--red); display:none;" id="btn-delete-group" data-i18n="delete_group">Delete group</button>
           <button class="btn-ghost btn-sm" style="color:var(--red);" id="btn-leave-group" data-i18n="leave_group">Leave group</button>
+        </div>
+      </div>
+
+      <!-- Modifica partite del gruppo (solo creatore) -->
+      <div id="manage-matches-panel" style="display:none;">
+        <div class="form-card">
+          <button type="button" class="modal-close" id="btn-close-manage-matches" aria-label="Close">✕</button>
+          <h3 data-i18n="manage_matches_title">Matches in this group</h3>
+          <div class="match-select-list" id="manage-match-list">
+            <div class="match-select-bar">
+              <input type="checkbox" id="manage-select-all" checked>
+              <label for="manage-select-all" style="margin:0; cursor:pointer;" data-i18n="select_all">Select all</label>
+              <span id="manage-selected-count" style="margin-left:auto;"></span>
+            </div>
+            <div id="manage-match-items"></div>
+          </div>
+          <button class="btn-primary" id="btn-save-manage-matches" data-i18n="save_changes">Save changes</button>
+          <div class="status" id="manage-matches-status" style="display:none; padding: 12px 0;"></div>
         </div>
       </div>
 
@@ -817,6 +911,10 @@ const strings = {
     my_groups: "My Groups", join_group: "Join a group",
     join_btn: "Join group", create_group: "Create a group",
     create_group_title: "New group", create_btn: "Create group",
+    select_matches_label: "Select which matches count for this group", select_all: "Select all",
+    manage_matches: "Manage matches", manage_matches_title: "Matches in this group",
+    save_changes: "Save changes", matches_updated: "Matches updated.",
+    delete_group: "Delete group", confirm_delete_group: "Delete this group permanently? This cannot be undone.",
     group_leaderboard: "Group Leaderboard",
     share_invite: "Share invite link", leave_group: "Leave group",
     group_matches: "Group Matches",
@@ -864,6 +962,10 @@ const strings = {
     my_groups: "I miei gruppi", join_group: "Entra in un gruppo",
     join_btn: "Entra nel gruppo", create_group: "Crea un gruppo",
     create_group_title: "Nuovo gruppo", create_btn: "Crea gruppo",
+    select_matches_label: "Seleziona quali partite contano per questo gruppo", select_all: "Seleziona tutte",
+    manage_matches: "Gestisci partite", manage_matches_title: "Partite di questo gruppo",
+    save_changes: "Salva modifiche", matches_updated: "Partite aggiornate.",
+    delete_group: "Elimina gruppo", confirm_delete_group: "Eliminare definitivamente questo gruppo? L'azione non è reversibile.",
     group_leaderboard: "Classifica del Gruppo",
     share_invite: "Condividi link invito", leave_group: "Abbandona gruppo",
     group_matches: "Partite del gruppo",
@@ -1439,20 +1541,29 @@ async function renderGroups() {
         </button>
       </div>
     `;
-    div.querySelector("button").onclick = () => showGroupDetail(g.invite_code, g.name, g.member_count);
+    div.querySelector("button").onclick = () => showGroupDetail(g.invite_code, g.name, g.member_count, g.is_admin);
     container.appendChild(div);
   });
 }
 
-async function showGroupDetail(code, name, memberCount) {
+let currentGroupIsAdmin = false;
+
+async function showGroupDetail(code, name, memberCount, isAdmin) {
   currentGroupCode = code;
+  currentGroupIsAdmin = !!isAdmin;
   document.getElementById("group-detail-name").textContent = name;
   document.getElementById("group-detail-meta").textContent = `${memberCount} members · Code: ${code}`;
+  document.getElementById("btn-manage-matches").style.display = currentGroupIsAdmin ? "inline-block" : "none";
+  document.getElementById("btn-delete-group").style.display = currentGroupIsAdmin ? "inline-block" : "none";
+  document.getElementById("btn-leave-group").style.display = currentGroupIsAdmin ? "none" : "inline-block";
+  document.getElementById("manage-matches-panel").style.display = "none";
 
   // Nascondi lista gruppi, mostra dettaglio
   document.getElementById("groups-list").style.display = "none";
   document.querySelectorAll("#tab-groups .section-title").forEach(el => el.style.display = "none");
-  document.querySelectorAll("#tab-groups .form-card").forEach(el => el.style.display = "none");
+  document.querySelectorAll("#tab-groups .form-card").forEach(el => {
+    if (!el.closest("#manage-matches-panel")) el.style.display = "none";
+  });
   document.getElementById("group-detail").style.display = "block";
 
   // Carica membri del gruppo
@@ -1482,12 +1593,20 @@ async function renderGroupLeaderboard(members, containerId, userAddr) {
   const nextId = await readContract.nextMatchId();
   const total = Number(nextId);
 
+  // Partite escluse per questo gruppo — non devono contare nel punteggio
+  let excludedIds = new Set();
+  try {
+    const exRes = await api("GET", `/groups/${currentGroupCode}/leaderboard`);
+    if (exRes.success) excludedIds = new Set((exRes.excludedMatches || []).map(Number));
+  } catch {}
+
   // Inizializza tutti i membri con 0 vittorie
   const winsMap = new Map();
   members.forEach(m => winsMap.set(m.address.toLowerCase(), 0));
 
-  // Conta vittorie on-chain per ogni membro
+  // Conta vittorie on-chain per ogni membro (esclude le partite fuori dal gruppo)
   for (let i = 0; i < total; i++) {
+    if (excludedIds.has(i)) continue;
     try {
       const m = await readContract.getMatch(i);
       if (!m.resolved) continue;
@@ -1533,9 +1652,17 @@ async function renderGroupMatches(members, filter) {
   const nextId = Number(await readContract.nextMatchId());
   const now = Date.now();
 
+  // Partite escluse per questo gruppo — non devono comparire nella lista
+  let excludedIds = new Set();
+  try {
+    const exRes = await api("GET", `/groups/${currentGroupCode}/leaderboard`);
+    if (exRes.success) excludedIds = new Set((exRes.excludedMatches || []).map(Number));
+  } catch {}
+
   // Carica tutte le partite on-chain
   const allMatches = [];
   for (let i = 0; i < nextId; i++) {
+    if (excludedIds.has(i)) continue;
     try {
       const m = await readContract.getMatch(i);
       allMatches.push({ id: i, teamHome: m.teamHome, teamAway: m.teamAway,
@@ -1655,8 +1782,11 @@ function showTab(tabName) {
     document.getElementById("group-detail").style.display = "none";
     document.getElementById("groups-list").style.display = "block";
     document.querySelectorAll("#tab-groups .section-title").forEach(el => el.style.display = "block");
-    document.querySelectorAll("#tab-groups .form-card").forEach(el => el.style.display = "block");
+    document.querySelectorAll("#tab-groups .form-card").forEach(el => {
+      if (!el.closest("#manage-matches-panel")) el.style.display = "block";
+    });
     renderGroups();
+    populateCreateGroupMatchList();
   }
 }
 
@@ -1957,12 +2087,62 @@ document.getElementById("btn-join-group").addEventListener("click", async () => 
   await joinGroup(code);
 });
 
+// Groups: popola la checklist partite per la creazione gruppo
+let createGroupMatches = [];
+
+async function populateCreateGroupMatchList() {
+  const container = document.getElementById("create-group-match-items");
+  container.innerHTML = `<div style="padding:12px; color:var(--chalk-dim); font-size:12px;">${t("loading")}</div>`;
+
+  try {
+    createGroupMatches = await loadMatchesFromChain();
+    createGroupMatches.sort((a, b) => Number(a.predictionDeadline) - Number(b.predictionDeadline));
+
+    container.innerHTML = "";
+    createGroupMatches.forEach((m) => {
+      const div = document.createElement("div");
+      div.className = "match-select-item";
+      const kickoff = new Date(Number(m.predictionDeadline) * 1000);
+      div.innerHTML = `
+        <input type="checkbox" id="cg-match-${m.id}" data-match-id="${m.id}" checked>
+        <div class="teams">${m.teamHome} vs ${m.teamAway}</div>
+        <div class="meta">${kickoff.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+      `;
+      div.querySelector("input").addEventListener("change", updateCreateGroupSelectedCount);
+      container.appendChild(div);
+    });
+    updateCreateGroupSelectedCount();
+  } catch (err) {
+    container.innerHTML = `<div style="padding:12px; color:var(--red); font-size:12px;">${err.message}</div>`;
+  }
+}
+
+function updateCreateGroupSelectedCount() {
+  const total = createGroupMatches.length;
+  const selected = document.querySelectorAll("#create-group-match-items input[type=checkbox]:checked").length;
+  document.getElementById("create-group-selected-count").textContent = `${selected}/${total}`;
+}
+
+document.getElementById("create-group-select-all").addEventListener("change", (e) => {
+  document.querySelectorAll("#create-group-match-items input[type=checkbox]").forEach(cb => {
+    cb.checked = e.target.checked;
+  });
+  updateCreateGroupSelectedCount();
+});
+
 // Groups: create
 document.getElementById("btn-create-group").addEventListener("click", async () => {
   const name = document.getElementById("group-name").value.trim();
   if (!name) return;
   const desc = document.getElementById("group-desc").value.trim();
-  const res = await api("POST", "/groups", { name, description: desc });
+
+  // Le partite deselezionate diventano "escluse" per questo gruppo — il backend
+  // salva solo la lista di esclusioni (group_excluded_matches), non l'inclusione.
+  const excludedMatchIds = createGroupMatches
+    .filter(m => !document.getElementById(`cg-match-${m.id}`)?.checked)
+    .map(m => m.id);
+
+  const res = await api("POST", "/groups", { name, description: desc, excludedMatchIds });
   const statusEl = document.getElementById("create-status");
   statusEl.style.display = "block";
   if (res.success) {
@@ -2013,6 +2193,118 @@ document.getElementById("btn-leave-group").addEventListener("click", async () =>
     showTab("groups");
   } else {
     alert(res.error);
+  }
+});
+
+// Groups: delete (solo creatore)
+document.getElementById("btn-delete-group").addEventListener("click", async () => {
+  if (!currentGroupCode) return;
+  if (!confirm(t("confirm_delete_group"))) return;
+  const res = await api("DELETE", `/groups/${currentGroupCode}`);
+  if (res.success) {
+    showTab("groups");
+  } else {
+    alert(res.error);
+  }
+});
+
+// Groups: manage matches (solo creatore) — apre/chiude il pannello e lo popola
+
+document.getElementById("btn-manage-matches").addEventListener("click", async () => {
+  const panel = document.getElementById("manage-matches-panel");
+  const isOpening = panel.style.display === "none";
+  panel.style.display = isOpening ? "flex" : "none";
+  if (isOpening) {
+    panel.querySelector(".form-card").style.display = ""; // difesa extra: nessun override inline residuo
+    await populateManageMatchList();
+  }
+});
+
+document.getElementById("btn-close-manage-matches").addEventListener("click", () => {
+  document.getElementById("manage-matches-panel").style.display = "none";
+});
+
+// Chiude il modale cliccando sullo sfondo scurito (non sulla card)
+document.getElementById("manage-matches-panel").addEventListener("click", (e) => {
+  if (e.target.id === "manage-matches-panel") {
+    e.currentTarget.style.display = "none";
+  }
+});
+
+async function populateManageMatchList() {
+  const container = document.getElementById("manage-match-items");
+  container.innerHTML = `<div style="padding:12px; color:var(--chalk-dim); font-size:12px;">${t("loading")}</div>`;
+
+  try {
+    const [allMatches, leaderboardRes] = await Promise.all([
+      loadMatchesFromChain(),
+      api("GET", `/groups/${currentGroupCode}/leaderboard`)
+    ]);
+    const excluded = new Set((leaderboardRes.excludedMatches || []).map(Number));
+
+    allMatches.sort((a, b) => Number(a.predictionDeadline) - Number(b.predictionDeadline));
+    container.innerHTML = "";
+    allMatches.forEach((m) => {
+      const div = document.createElement("div");
+      div.className = "match-select-item";
+      const kickoff = new Date(Number(m.predictionDeadline) * 1000);
+      const isChecked = !excluded.has(m.id);
+      div.innerHTML = `
+        <input type="checkbox" id="mg-match-${m.id}" data-match-id="${m.id}" ${isChecked ? "checked" : ""}>
+        <div class="teams">${m.teamHome} vs ${m.teamAway}</div>
+        <div class="meta">${kickoff.toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</div>
+      `;
+      div.querySelector("input").addEventListener("change", () => {
+        const total = allMatches.length;
+        const selected = document.querySelectorAll("#manage-match-items input[type=checkbox]:checked").length;
+        document.getElementById("manage-selected-count").textContent = `${selected}/${total}`;
+      });
+      container.appendChild(div);
+    });
+
+    document.getElementById("manage-selected-count").textContent =
+      `${document.querySelectorAll("#manage-match-items input[type=checkbox]:checked").length}/${allMatches.length}`;
+
+    document.getElementById("btn-save-manage-matches").dataset.matches = JSON.stringify(allMatches.map(m => m.id));
+  } catch (err) {
+    container.innerHTML = `<div style="padding:12px; color:var(--red); font-size:12px;">${err.message}</div>`;
+  }
+}
+
+document.getElementById("manage-select-all").addEventListener("change", (e) => {
+  document.querySelectorAll("#manage-match-items input[type=checkbox]").forEach(cb => {
+    cb.checked = e.target.checked;
+  });
+  const total = document.querySelectorAll("#manage-match-items input[type=checkbox]").length;
+  const selected = document.querySelectorAll("#manage-match-items input[type=checkbox]:checked").length;
+  document.getElementById("manage-selected-count").textContent = `${selected}/${total}`;
+});
+
+document.getElementById("btn-save-manage-matches").addEventListener("click", async () => {
+  const allIds = JSON.parse(document.getElementById("btn-save-manage-matches").dataset.matches || "[]");
+  const excludedMatchIds = allIds.filter(id => !document.getElementById(`mg-match-${id}`)?.checked);
+
+  const statusEl = document.getElementById("manage-matches-status");
+  statusEl.style.display = "block";
+  statusEl.textContent = t("loading");
+  statusEl.style.color = "var(--chalk-dim)";
+
+  const res = await api("PUT", `/groups/${currentGroupCode}/matches`, { excludedMatchIds });
+  if (res.success) {
+    statusEl.textContent = t("matches_updated");
+    statusEl.style.color = "var(--green)";
+    // Aggiorna classifica/partite mostrate con le nuove esclusioni
+    const membersRes = await api("GET", `/groups/${currentGroupCode}/members`);
+    if (membersRes.success) {
+      await renderGroupLeaderboard(membersRes.members, "group-leaderboard-list", currentUser?.address);
+      await renderGroupMatches(membersRes.members, "upcoming");
+    }
+    setTimeout(() => {
+      document.getElementById("manage-matches-panel").style.display = "none";
+    }, 900);
+  } else {
+    statusEl.textContent = res.error;
+    statusEl.style.color = "var(--red)";
   }
 });
 

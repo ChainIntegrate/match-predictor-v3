@@ -327,6 +327,56 @@ app.post("/api/matches-data", async (req, res) => {
   res.json({ success: true, message: "Dati partite aggiornati" });
 });
 
+// ── Admin: pin JSON su IPFS via Pinata (solo owner, firma ERC-1271) ───────
+// POST /api/admin/pin-json  { message, signature, json, name }
+// Usato dal pannello admin per caricare i metadata LSP4 (collezione e per-token)
+// senza esporre la chiave Pinata nel browser.
+app.post("/api/admin/pin-json", async (req, res) => {
+  const { message, signature, json, name } = req.body;
+  if (!message || !signature || !json || typeof json !== "object") {
+    return res.status(400).json({ success: false, error: "Body non valido" });
+  }
+
+  const timestampMatch = message.match(/(\d{13})/);
+  if (!timestampMatch) return res.status(400).json({ success: false, error: "Timestamp mancante nel messaggio" });
+  const ageMs = Date.now() - parseInt(timestampMatch[1], 10);
+  if (ageMs > 5 * 60 * 1000 || ageMs < -60 * 1000) {
+    return res.status(401).json({ success: false, error: "Firma scaduta" });
+  }
+
+  const isValid = await verifyOwnerSignature(message, signature);
+  if (!isValid) return res.status(403).json({ success: false, error: "Firma non autorizzata" });
+
+  if (!process.env.PINATA_JWT) {
+    return res.status(500).json({ success: false, error: "PINATA_JWT non configurata sul server" });
+  }
+
+  try {
+    const pinataRes = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.PINATA_JWT}`
+      },
+      body: JSON.stringify({
+        pinataContent: json,
+        pinataMetadata: { name: name || "metadata.json" },
+        pinataOptions: { cidVersion: 1 }
+      })
+    });
+
+    if (!pinataRes.ok) {
+      const errText = await pinataRes.text();
+      return res.status(502).json({ success: false, error: `Pinata: ${pinataRes.status} ${errText}` });
+    }
+
+    const pinataData = await pinataRes.json();
+    res.json({ success: true, cid: pinataData.IpfsHash });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ── Proxy punteggio partita ───────────────────────────────────────────────
 // GET /api/match-score/:footballDataMatchId
 const scoreCache = new Map();
@@ -455,7 +505,7 @@ function generateInviteCode() {
 
 // POST /api/groups — crea un nuovo gruppo
 app.post("/api/groups", requireAuth, (req, res) => {
-  const { name, description, maxMembers } = req.body;
+  const { name, description, maxMembers, excludedMatchIds } = req.body;
   if (!name?.trim()) return res.status(400).json({ success: false, error: "Nome gruppo richiesto" });
 
   // Verifica limite gruppi creati
@@ -481,6 +531,20 @@ app.post("/api/groups", requireAuth, (req, res) => {
 
   // Aggiunge il creatore come membro
   db.prepare("INSERT INTO group_members (group_id, user_id) VALUES (?, ?)").run(result.lastInsertRowid, req.user.userId);
+
+  // Partite deselezionate alla creazione (il frontend manda la lista di ESCLUSE,
+  // non quella di incluse — di default un gruppo include tutte le partite)
+  if (Array.isArray(excludedMatchIds)) {
+    const insertExcluded = db.prepare(
+      "INSERT OR IGNORE INTO group_excluded_matches (group_id, contract_match_id) VALUES (?, ?)"
+    );
+    for (const rawId of excludedMatchIds) {
+      const matchId = Number(rawId);
+      if (Number.isInteger(matchId) && matchId >= 0) {
+        insertExcluded.run(result.lastInsertRowid, matchId);
+      }
+    }
+  }
 
   const group = db.prepare("SELECT * FROM groups WHERE id = ?").get(result.lastInsertRowid);
   res.json({ success: true, group, inviteUrl: `${process.env.FRONTEND_URL}/join/${inviteCode}` });
@@ -581,6 +645,35 @@ app.get("/api/groups/:inviteCode/members", requireAuth, (req, res) => {
   `).all(req.user.userId, group.id);
 
   res.json({ success: true, group, members });
+});
+
+// PUT /api/groups/:inviteCode/matches — aggiorna le partite escluse (solo creatore)
+app.put("/api/groups/:inviteCode/matches", requireAuth, (req, res) => {
+  const { excludedMatchIds } = req.body;
+  const group = db.prepare("SELECT * FROM groups WHERE invite_code = ?").get(req.params.inviteCode.toUpperCase());
+  if (!group) return res.status(404).json({ success: false, error: "Gruppo non trovato" });
+  if (group.created_by !== req.user.userId) {
+    return res.status(403).json({ success: false, error: "Solo il creatore può modificare le partite del gruppo" });
+  }
+  if (!Array.isArray(excludedMatchIds)) {
+    return res.status(400).json({ success: false, error: "excludedMatchIds deve essere un array" });
+  }
+
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM group_excluded_matches WHERE group_id = ?").run(group.id);
+    const insertExcluded = db.prepare(
+      "INSERT OR IGNORE INTO group_excluded_matches (group_id, contract_match_id) VALUES (?, ?)"
+    );
+    for (const rawId of excludedMatchIds) {
+      const matchId = Number(rawId);
+      if (Number.isInteger(matchId) && matchId >= 0) {
+        insertExcluded.run(group.id, matchId);
+      }
+    }
+  });
+  tx();
+
+  res.json({ success: true, message: "Partite del gruppo aggiornate" });
 });
 
 // DELETE /api/groups/:inviteCode/leave — abbandona un gruppo
