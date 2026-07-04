@@ -810,10 +810,12 @@
         <div style="flex:1;">
           <div style="font-weight:700; font-size:18px;" id="group-detail-name"></div>
           <div style="font-size:12px; color:var(--chalk-dim);" id="group-detail-meta"></div>
+          <span class="badge-testnet" id="group-frozen-badge" style="display:none; margin-top:6px; background:var(--gold); color:var(--bg); font-weight:700;" data-i18n="frozen_badge">🏆 FROZEN — final standings</span>
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button class="btn-ghost btn-sm" id="btn-share-group" data-i18n="share_invite">Share invite link</button>
           <button class="btn-ghost btn-sm" id="btn-manage-matches" data-i18n="manage_matches" style="display:none;">Manage matches</button>
+          <button class="btn-ghost btn-sm" id="btn-freeze-group" data-i18n="freeze_group" style="display:none;">🧊 Freeze group</button>
           <button class="btn-ghost btn-sm" style="color:var(--red); display:none;" id="btn-delete-group" data-i18n="delete_group">Delete group</button>
           <button class="btn-ghost btn-sm" style="color:var(--red);" id="btn-leave-group" data-i18n="leave_group">Leave group</button>
         </div>
@@ -943,6 +945,8 @@ const strings = {
     manage_matches: "Manage matches", manage_matches_title: "Matches in this group",
     save_changes: "Save changes", matches_updated: "Matches updated.",
     delete_group: "Delete group", confirm_delete_group: "Delete this group permanently? This cannot be undone.",
+    freeze_group: "🧊 Freeze group", frozen_badge: "🏆 FROZEN — final standings", frozen_short: "FROZEN",
+    confirm_freeze_group: "Freeze this group? The leaderboard will be locked as final and stop updating. This frees up a group slot but can't be undone. Continue?",
     group_leaderboard: "Group Leaderboard",
     share_invite: "Share invite link", leave_group: "Leave group",
     group_matches: "Group Matches",
@@ -995,6 +999,8 @@ const strings = {
     manage_matches: "Gestisci partite", manage_matches_title: "Partite di questo gruppo",
     save_changes: "Salva modifiche", matches_updated: "Partite aggiornate.",
     delete_group: "Elimina gruppo", confirm_delete_group: "Eliminare definitivamente questo gruppo? L'azione non è reversibile.",
+    freeze_group: "🧊 Congela gruppo", frozen_badge: "🏆 CONGELATO — classifica finale", frozen_short: "CONGELATO",
+    confirm_freeze_group: "Congelare questo gruppo? La classifica verrà bloccata come definitiva e non si aggiornerà più. Libera uno slot gruppo, ma l'azione non è reversibile. Continuare?",
     group_leaderboard: "Classifica del Gruppo",
     share_invite: "Condividi link invito", leave_group: "Abbandona gruppo",
     group_matches: "Partite del gruppo",
@@ -1562,7 +1568,7 @@ async function renderGroups() {
     div.className = "group-card";
     div.innerHTML = `
       <div>
-        <div class="group-name">${g.name}</div>
+        <div class="group-name">${g.name} ${g.frozen_at ? `<span style="font-size:11px; color:var(--gold);">🏆 ${t("frozen_short")}</span>` : ""}</div>
         <div class="group-meta">${g.member_count} members · Code: <strong>${g.invite_code}</strong></div>
         ${g.description ? `<div class="group-meta" style="margin-top:4px;">${g.description}</div>` : ""}
       </div>
@@ -1578,15 +1584,14 @@ async function renderGroups() {
 }
 
 let currentGroupIsAdmin = false;
+let currentGroupFrozenSnapshot = null;
 
 async function showGroupDetail(code, name, memberCount, isAdmin) {
   currentGroupCode = code;
   currentGroupIsAdmin = !!isAdmin;
+  currentGroupFrozenSnapshot = null;
   document.getElementById("group-detail-name").textContent = name;
   document.getElementById("group-detail-meta").textContent = `${memberCount} members · Code: ${code}`;
-  document.getElementById("btn-manage-matches").style.display = currentGroupIsAdmin ? "inline-block" : "none";
-  document.getElementById("btn-delete-group").style.display = currentGroupIsAdmin ? "inline-block" : "none";
-  document.getElementById("btn-leave-group").style.display = currentGroupIsAdmin ? "none" : "inline-block";
   document.getElementById("manage-matches-panel").style.display = "none";
 
   // Nascondi lista gruppi, mostra dettaglio
@@ -1601,13 +1606,24 @@ async function showGroupDetail(code, name, memberCount, isAdmin) {
   const res = await api("GET", `/groups/${code}/members`);
   if (!res.success) return;
 
+  const isFrozen = !!res.group?.frozen_at;
+  if (isFrozen && res.group.frozen_snapshot) {
+    try { currentGroupFrozenSnapshot = JSON.parse(res.group.frozen_snapshot); } catch {}
+  }
+
+  document.getElementById("btn-manage-matches").style.display = (currentGroupIsAdmin && !isFrozen) ? "inline-block" : "none";
+  document.getElementById("btn-freeze-group").style.display = (currentGroupIsAdmin && !isFrozen) ? "inline-block" : "none";
+  document.getElementById("btn-delete-group").style.display = currentGroupIsAdmin ? "inline-block" : "none";
+  document.getElementById("btn-leave-group").style.display = currentGroupIsAdmin ? "none" : "inline-block";
+  document.getElementById("group-frozen-badge").style.display = isFrozen ? "inline-block" : "none";
+
   const members = res.members;
   const displayNames = {};
   members.forEach(m => {
     if (m.display_name) displayNames[m.address.toLowerCase()] = m.display_name;
   });
 
-  // Classifica: tutti i membri con punti (calcolati on-chain)
+  // Classifica: tutti i membri con punti (calcolati on-chain, o snapshot se congelato)
   const addresses = members.map(m => m.address.toLowerCase());
   addresses.displayNames = displayNames;
   await renderGroupLeaderboard(members, "group-leaderboard-list", currentUser?.address);
@@ -1616,26 +1632,16 @@ async function showGroupDetail(code, name, memberCount, isAdmin) {
   await renderGroupMatches(members, "upcoming");
 }
 
-async function renderGroupLeaderboard(members, containerId, userAddr) {
+// Calcola la classifica di un gruppo (vittorie per membro, partite escluse rispettate).
+// Riusata sia per il rendering live sia per lo snapshot al congelamento.
+async function computeGroupStandings(members, excludedIds) {
   await initEthers();
-  const container = document.getElementById(containerId);
-  container.innerHTML = `<div class="status">${t("loading")}</div>`;
-
   const nextId = await readContract.nextMatchId();
   const total = Number(nextId);
 
-  // Partite escluse per questo gruppo — non devono contare nel punteggio
-  let excludedIds = new Set();
-  try {
-    const exRes = await api("GET", `/groups/${currentGroupCode}/leaderboard`);
-    if (exRes.success) excludedIds = new Set((exRes.excludedMatches || []).map(Number));
-  } catch {}
-
-  // Inizializza tutti i membri con 0 vittorie
   const winsMap = new Map();
   members.forEach(m => winsMap.set(m.address.toLowerCase(), 0));
 
-  // Conta vittorie on-chain per ogni membro (esclude le partite fuori dal gruppo)
   for (let i = 0; i < total; i++) {
     if (excludedIds.has(i)) continue;
     try {
@@ -1651,26 +1657,51 @@ async function renderGroupLeaderboard(members, containerId, userAddr) {
     } catch {}
   }
 
-  // Ordina per vittorie decrescenti
-  const ranked = [...winsMap.entries()].sort((a, b) => b[1] - a[1]);
+  return [...winsMap.entries()]
+    .map(([address, wins]) => {
+      const member = members.find(m => m.address.toLowerCase() === address);
+      return { address, wins, displayName: member?.display_name || null };
+    })
+    .sort((a, b) => b.wins - a.wins);
+}
 
+function renderStandingsRows(container, ranked, userAddr) {
   container.innerHTML = "";
-  ranked.forEach(([addr, count], i) => {
-    const member = members.find(m => m.address.toLowerCase() === addr);
-    const displayName = member?.display_name || null;
-    const isMe = addr === userAddr?.toLowerCase();
+  ranked.forEach((entry, i) => {
+    const isMe = entry.address === userAddr?.toLowerCase();
     const row = document.createElement("div");
     row.className = "leaderboard-row" + (isMe ? " me" : "");
     row.innerHTML = `
       <span class="rank ${i < 3 ? "gold" : ""}">${i + 1}</span>
       <div style="flex:1;">
-        ${displayName ? `<div class="lb-name">${displayName}</div>` : ""}
-        <div class="lb-addr">${addr.slice(0, 8)}…${addr.slice(-6)}</div>
+        ${entry.displayName ? `<div class="lb-name">${entry.displayName}</div>` : ""}
+        <div class="lb-addr">${entry.address.slice(0, 8)}…${entry.address.slice(-6)}</div>
       </div>
-      <span class="lb-wins">${count} ${count === 1 ? t("win") : t("wins")}</span>
+      <span class="lb-wins">${entry.wins} ${entry.wins === 1 ? t("win") : t("wins")}</span>
     `;
     container.appendChild(row);
   });
+}
+
+async function renderGroupLeaderboard(members, containerId, userAddr) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = `<div class="status">${t("loading")}</div>`;
+
+  // Gruppo congelato: nessuna lettura on-chain, si mostra lo snapshot salvato.
+  if (currentGroupFrozenSnapshot) {
+    renderStandingsRows(container, currentGroupFrozenSnapshot, userAddr);
+    return;
+  }
+
+  // Partite escluse per questo gruppo — non devono contare nel punteggio
+  let excludedIds = new Set();
+  try {
+    const exRes = await api("GET", `/groups/${currentGroupCode}/leaderboard`);
+    if (exRes.success) excludedIds = new Set((exRes.excludedMatches || []).map(Number));
+  } catch {}
+
+  const ranked = await computeGroupStandings(members, excludedIds);
+  renderStandingsRows(container, ranked, userAddr);
 }
 
 async function renderGroupMatches(members, filter) {
@@ -2236,6 +2267,38 @@ document.getElementById("btn-delete-group").addEventListener("click", async () =
     showTab("groups");
   } else {
     alert(res.error);
+  }
+});
+
+// Groups: freeze (solo creatore) — congela la classifica finale, libera lo slot gruppo
+document.getElementById("btn-freeze-group").addEventListener("click", async () => {
+  if (!currentGroupCode) return;
+  if (!confirm(t("confirm_freeze_group"))) return;
+
+  const btn = document.getElementById("btn-freeze-group");
+  btn.disabled = true;
+  btn.textContent = "…";
+
+  try {
+    const membersRes = await api("GET", `/groups/${currentGroupCode}/members`);
+    if (!membersRes.success) throw new Error(membersRes.error);
+
+    let excludedIds = new Set();
+    const exRes = await api("GET", `/groups/${currentGroupCode}/leaderboard`);
+    if (exRes.success) excludedIds = new Set((exRes.excludedMatches || []).map(Number));
+
+    const snapshot = await computeGroupStandings(membersRes.members, excludedIds);
+
+    const res = await api("POST", `/groups/${currentGroupCode}/freeze`, { snapshot });
+    if (!res.success) throw new Error(res.error);
+
+    await showGroupDetail(currentGroupCode, document.getElementById("group-detail-name").textContent,
+      membersRes.members.length, currentGroupIsAdmin);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = t("freeze_group");
   }
 });
 

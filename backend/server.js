@@ -533,14 +533,18 @@ app.post("/api/groups", requireAuth, (req, res) => {
   const { name, description, maxMembers, excludedMatchIds } = req.body;
   if (!name?.trim()) return res.status(400).json({ success: false, error: "Nome gruppo richiesto" });
 
-  // Verifica limite gruppi creati
-  const created = db.prepare("SELECT COUNT(*) as count FROM groups WHERE created_by = ?").get(req.user.userId);
+  // Verifica limite gruppi creati (i gruppi congelati non contano più)
+  const created = db.prepare("SELECT COUNT(*) as count FROM groups WHERE created_by = ? AND frozen_at IS NULL").get(req.user.userId);
   if (created.count >= MAX_GROUPS_CREATED) {
     return res.status(403).json({ success: false, error: `Puoi creare al massimo ${MAX_GROUPS_CREATED} gruppi` });
   }
 
-  // Verifica limite gruppi a cui partecipa
-  const joined = db.prepare("SELECT COUNT(*) as count FROM group_members WHERE user_id = ?").get(req.user.userId);
+  // Verifica limite gruppi a cui partecipa (idem, i congelati non contano)
+  const joined = db.prepare(`
+    SELECT COUNT(*) as count FROM group_members gm
+    JOIN groups g ON gm.group_id = g.id
+    WHERE gm.user_id = ? AND g.frozen_at IS NULL
+  `).get(req.user.userId);
   if (joined.count >= MAX_GROUPS_JOINED) {
     return res.status(403).json({ success: false, error: `Puoi partecipare a massimo ${MAX_GROUPS_JOINED} gruppi` });
   }
@@ -611,8 +615,12 @@ app.post("/api/groups/:inviteCode/join", requireAuth, (req, res) => {
   const alreadyMember = db.prepare("SELECT id FROM group_members WHERE group_id = ? AND user_id = ?").get(group.id, req.user.userId);
   if (alreadyMember) return res.status(409).json({ success: false, error: "Sei già membro di questo gruppo" });
 
-  // Verifica limite gruppi a cui partecipa
-  const joined = db.prepare("SELECT COUNT(*) as count FROM group_members WHERE user_id = ?").get(req.user.userId);
+  // Verifica limite gruppi a cui partecipa (i gruppi congelati non contano)
+  const joined = db.prepare(`
+    SELECT COUNT(*) as count FROM group_members gm
+    JOIN groups g ON gm.group_id = g.id
+    WHERE gm.user_id = ? AND g.frozen_at IS NULL
+  `).get(req.user.userId);
   if (joined.count >= MAX_GROUPS_JOINED) {
     return res.status(403).json({ success: false, error: `Puoi partecipare a massimo ${MAX_GROUPS_JOINED} gruppi` });
   }
@@ -699,6 +707,31 @@ app.put("/api/groups/:inviteCode/matches", requireAuth, (req, res) => {
   tx();
 
   res.json({ success: true, message: "Partite del gruppo aggiornate" });
+});
+
+// POST /api/groups/:inviteCode/freeze — congela la classifica finale (solo creatore)
+// Lo snapshot viene calcolato dal frontend (stesso posto dove si leggono già i dati
+// on-chain) e passato qui solo per essere salvato. Un gruppo congelato non conta
+// più contro i limiti di creazione/partecipazione, e la sua classifica smette di
+// aggiornarsi: resta il risultato finale, per sempre.
+app.post("/api/groups/:inviteCode/freeze", requireAuth, (req, res) => {
+  const { snapshot } = req.body;
+  const group = db.prepare("SELECT * FROM groups WHERE invite_code = ?").get(req.params.inviteCode.toUpperCase());
+  if (!group) return res.status(404).json({ success: false, error: "Gruppo non trovato" });
+  if (group.created_by !== req.user.userId) {
+    return res.status(403).json({ success: false, error: "Solo il creatore può congelare il gruppo" });
+  }
+  if (group.frozen_at) {
+    return res.status(409).json({ success: false, error: "Il gruppo è già congelato" });
+  }
+  if (!Array.isArray(snapshot)) {
+    return res.status(400).json({ success: false, error: "snapshot deve essere un array" });
+  }
+
+  db.prepare("UPDATE groups SET frozen_at = unixepoch(), frozen_snapshot = ? WHERE id = ?")
+    .run(JSON.stringify(snapshot), group.id);
+
+  res.json({ success: true, message: "Gruppo congelato" });
 });
 
 // DELETE /api/groups/:inviteCode/leave — abbandona un gruppo

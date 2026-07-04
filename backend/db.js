@@ -58,6 +58,8 @@ db.exec(`
     created_by  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     invite_code TEXT    NOT NULL UNIQUE,
     max_members INTEGER NOT NULL DEFAULT 50,
+    frozen_at       INTEGER,
+    frozen_snapshot TEXT,
     created_at  INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
