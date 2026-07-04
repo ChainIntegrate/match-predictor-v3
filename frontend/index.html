@@ -430,6 +430,7 @@
   /* ── Status / loading ── */
   .status { text-align: center; color: var(--chalk-dim); font-size: 13px; padding: 32px; }
   .status.error { color: var(--red); }
+  .status.success { color: var(--green); }
 
   .section-title {
     font-size: 13px;
@@ -605,6 +606,11 @@
         <div class="form-group">
           <label data-i18n="email_label">Email address</label>
           <input type="email" id="register-email" placeholder="you@example.com">
+        </div>
+        <div class="form-group">
+          <label data-i18n="up_label">Universal Profile address (optional)</label>
+          <input type="text" id="register-up" placeholder="0x...">
+          <small id="up-status" style="display:block; margin-top:4px;"></small>
         </div>
         <div class="checkbox-group">
           <input type="checkbox" id="check-privacy">
@@ -791,6 +797,9 @@ const strings = {
     logout: "Logout",
     login_title: "Predict. Win. Own.",
     login_subtitle: "Enter your email to receive a magic link. No password, no wallet required.",
+    up_label: "Universal Profile address (optional)",
+    up_checking: "Checking…", up_valid: "✓ Valid Universal Profile",
+    up_invalid: "✗ Not a valid Universal Profile",
     email_label: "Email address",
     privacy_accept: "I have read and accept the", privacy_link: "Privacy Policy",
     privacy_accept2: "and consent to the processing of my email for login purposes.",
@@ -833,6 +842,9 @@ const strings = {
     logout: "Esci",
     login_title: "Pronostica. Vinci. Possiedi.",
     login_subtitle: "Inserisci la tua email per ricevere un link magico. Nessuna password, nessun wallet.",
+    up_label: "Indirizzo Universal Profile (opzionale)",
+    up_checking: "Verifica in corso…", up_valid: "✓ Universal Profile valida",
+    up_invalid: "✗ Non è una Universal Profile valida",
     email_label: "Indirizzo email",
     privacy_accept: "Ho letto e accetto la", privacy_link: "Privacy Policy",
     privacy_accept2: "e consento al trattamento della mia email per l'accesso.",
@@ -1832,15 +1844,50 @@ btnSendLink.addEventListener("click", async () => {
 
 // Register form (nuovo utente)
 const registerEmailInput = document.getElementById("register-email");
+const registerUpInput = document.getElementById("register-up");
+const upStatusEl = document.getElementById("up-status");
 const checkPrivacy = document.getElementById("check-privacy");
 const checkTerms = document.getElementById("check-terms");
 const btnRegister = document.getElementById("btn-register");
 
+let validatedUpAddress = null;
+let upValidationPending = false;
+
 function updateRegisterBtn() {
-  btnRegister.disabled = !registerEmailInput.value.includes("@") || !checkPrivacy.checked || !checkTerms.checked;
+  const upFieldOk = registerUpInput.value.trim() === "" || !!validatedUpAddress;
+  btnRegister.disabled = !registerEmailInput.value.includes("@")
+    || !checkPrivacy.checked || !checkTerms.checked
+    || !upFieldOk || upValidationPending;
+}
+
+async function validateUpField() {
+  const val = registerUpInput.value.trim();
+  validatedUpAddress = null;
+  upStatusEl.textContent = "";
+  upStatusEl.className = "";
+
+  if (!val) { updateRegisterBtn(); return; }
+
+  upValidationPending = true;
+  upStatusEl.textContent = t("up_checking");
+  updateRegisterBtn();
+
+  const res = await api("GET", `/auth/validate-up?address=${encodeURIComponent(val)}`, null, false);
+  upValidationPending = false;
+
+  if (res.success && res.valid) {
+    validatedUpAddress = res.address;
+    upStatusEl.textContent = t("up_valid");
+    upStatusEl.className = "status success";
+  } else {
+    upStatusEl.textContent = t("up_invalid");
+    upStatusEl.className = "status error";
+  }
+  updateRegisterBtn();
 }
 
 registerEmailInput.addEventListener("input", updateRegisterBtn);
+registerUpInput.addEventListener("blur", validateUpField);
 checkPrivacy.addEventListener("change", updateRegisterBtn);
 checkTerms.addEventListener("change", updateRegisterBtn);
 
@@ -1848,7 +1895,8 @@ btnRegister.addEventListener("click", async () => {
   btnRegister.disabled = true;
   btnRegister.textContent = "…";
   const email = registerEmailInput.value.trim().toLowerCase();
-  const res = await api("POST", "/auth/request-link", { email }, false);
+  const body = validatedUpAddress ? { email, upAddress: validatedUpAddress } : { email };
+  const res = await api("POST", "/auth/request-link", body, false);
   if (res.success) {
     document.getElementById("register-form").style.display = "none";
     document.getElementById("link-sent").style.display = "block";

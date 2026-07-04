@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const db = require("./db");
 const { generateUserWallet } = require("./keys");
+const { validateUPAddress } = require("./upValidator");
 const { sendMagicLink, verifyMagicLink, generateAccessToken, generateRefreshToken, rotateRefreshToken, requireAuth } = require("./auth");
 const { predictFor, predictBatchFor, claimFor } = require("./sponsor");
 const { ethers } = require("ethers");
@@ -60,16 +61,36 @@ app.get("/api/auth/check-email", (req, res) => {
   res.json({ success: true, exists: !!user });
 });
 
+// ── Auth: valida un indirizzo UP (per feedback live nel form di registrazione) ──
+// GET /api/auth/validate-up?address=0x...
+app.get("/api/auth/validate-up", async (req, res) => {
+  const result = await validateUPAddress(req.query.address);
+  res.json({ success: true, ...result });
+});
+
 // ── Auth: richiedi magic link ─────────────────────────────────────────────
-// POST /api/auth/request-link  { email }
+// POST /api/auth/request-link  { email, upAddress? }
 app.post("/api/auth/request-link", async (req, res) => {
-  const { email } = req.body;
+  const { email, upAddress } = req.body;
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ success: false, error: "Email non valida" });
   }
 
+  let validatedUP = null;
+  if (upAddress) {
+    const check = await validateUPAddress(upAddress);
+    if (!check.valid) {
+      return res.status(400).json({ success: false, error: "Indirizzo UP non valido", reason: check.reason });
+    }
+    const existing = db.prepare("SELECT id FROM users WHERE address = ?").get(check.address);
+    if (existing) {
+      return res.status(409).json({ success: false, error: "Indirizzo UP già associato a un altro account" });
+    }
+    validatedUP = check.address;
+  }
+
   try {
-    await sendMagicLink(email.toLowerCase().trim());
+    await sendMagicLink(email.toLowerCase().trim(), validatedUP);
     res.json({ success: true, message: "Link inviato. Controlla la tua email." });
   } catch (err) {
     console.error("Errore invio magic link:", err.message);
@@ -83,17 +104,35 @@ app.get("/api/auth/verify", async (req, res) => {
   const { token } = req.query;
   if (!token) return res.status(400).json({ success: false, error: "Token mancante" });
 
-  const email = verifyMagicLink(token);
-  if (!email) return res.status(401).json({ success: false, error: "Link non valido o scaduto" });
+  const verified = verifyMagicLink(token);
+  if (!verified) return res.status(401).json({ success: false, error: "Link non valido o scaduto" });
 
+  const { email, upAddress } = verified;
   let user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
 
   if (!user) {
-    // Primo accesso: genera una EOA dedicata
-    const { address, encryptedPrivateKey } = generateUserWallet();
-    db.prepare(
-      "INSERT INTO users (email, address, encrypted_private_key, terms_accepted) VALUES (?, ?, ?, 1)"
-    ).run(email, address, encryptedPrivateKey);
+    if (upAddress) {
+      // Registrazione con UP propria: ri-valida on-chain (difesa in profondità,
+      // il link poteva essere generato minuti prima e l'indirizzo nel frattempo
+      // essere stato preso da un altro utente o non essere più una UP valida)
+      const check = await validateUPAddress(upAddress);
+      if (!check.valid) {
+        return res.status(400).json({ success: false, error: "L'indirizzo UP non è più valido" });
+      }
+      const existing = db.prepare("SELECT id FROM users WHERE address = ?").get(check.address);
+      if (existing) {
+        return res.status(409).json({ success: false, error: "Indirizzo UP già associato a un altro account" });
+      }
+      db.prepare(
+        "INSERT INTO users (email, address, encrypted_private_key, is_up, terms_accepted) VALUES (?, ?, NULL, 1, 1)"
+      ).run(email, check.address);
+    } else {
+      // Primo accesso senza UP: genera una EOA dedicata
+      const { address, encryptedPrivateKey } = generateUserWallet();
+      db.prepare(
+        "INSERT INTO users (email, address, encrypted_private_key, terms_accepted) VALUES (?, ?, ?, 1)"
+      ).run(email, address, encryptedPrivateKey);
+    }
     user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
   }
 
@@ -155,21 +194,22 @@ app.post("/api/user/display-name", requireAuth, (req, res) => {
 
 // ── Utente: collega UP ────────────────────────────────────────────────────
 // POST /api/user/link-up  { upAddress }
-app.post("/api/user/link-up", requireAuth, (req, res) => {
+app.post("/api/user/link-up", requireAuth, async (req, res) => {
   const { upAddress } = req.body;
-  if (!upAddress || !ethers.isAddress(upAddress)) {
-    return res.status(400).json({ success: false, error: "Indirizzo UP non valido" });
+  const check = await validateUPAddress(upAddress);
+  if (!check.valid) {
+    return res.status(400).json({ success: false, error: "Indirizzo UP non valido", reason: check.reason });
   }
 
   // Verifica che l'indirizzo non sia già usato da un altro utente
-  const existing = db.prepare("SELECT id FROM users WHERE address = ? AND id != ?").get(upAddress, req.user.userId);
+  const existing = db.prepare("SELECT id FROM users WHERE address = ? AND id != ?").get(check.address, req.user.userId);
   if (existing) return res.status(409).json({ success: false, error: "Indirizzo già associato a un altro account" });
 
   db.prepare(
     "UPDATE users SET address = ?, is_up = 1, encrypted_private_key = NULL WHERE id = ?"
-  ).run(upAddress, req.user.userId);
+  ).run(check.address, req.user.userId);
 
-  res.json({ success: true, message: "Universal Profile collegata con successo", address: upAddress });
+  res.json({ success: true, message: "Universal Profile collegata con successo", address: check.address });
 });
 
 // ── Pronostici: registra uno ──────────────────────────────────────────────

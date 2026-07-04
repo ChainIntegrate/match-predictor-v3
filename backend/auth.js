@@ -27,7 +27,10 @@ const transporter = nodemailer.createTransport({
 // ── Magic link ────────────────────────────────────────────────────────────
 
 /// Genera un magic link, lo salva nel DB e lo invia via email.
-async function sendMagicLink(email) {
+/// Se upAddress è presente (già validata come LSP0 dal chiamante), viene
+/// salvata sul magic link e usata in fase di verify per creare l'utente
+/// senza generare una EOA dedicata.
+async function sendMagicLink(email, upAddress = null) {
   // Cancella eventuali link precedenti non usati per questa email
   db.prepare("DELETE FROM magic_links WHERE email = ? AND used = 0").run(email);
 
@@ -35,8 +38,8 @@ async function sendMagicLink(email) {
   const expiresAt = Math.floor(Date.now() / 1000) + MAGIC_LINK_EXPIRY_MINUTES * 60;
 
   db.prepare(
-    "INSERT INTO magic_links (email, token, expires_at) VALUES (?, ?, ?)"
-  ).run(email, token, expiresAt);
+    "INSERT INTO magic_links (email, token, expires_at, up_address) VALUES (?, ?, ?, ?)"
+  ).run(email, token, expiresAt, upAddress);
 
   const link = `${process.env.FRONTEND_URL}/auth?token=${token}`;
 
@@ -68,7 +71,8 @@ async function sendMagicLink(email) {
   return token; // restituito solo per i test, non esporlo al client
 }
 
-/// Verifica un magic link e restituisce l'email associata se valido.
+/// Verifica un magic link e restituisce { email, upAddress } se valido, null altrimenti.
+/// upAddress è null se l'utente si è registrato con generazione automatica di EOA.
 function verifyMagicLink(token) {
   const row = db.prepare(
     "SELECT * FROM magic_links WHERE token = ? AND used = 0 AND expires_at > unixepoch()"
@@ -79,7 +83,7 @@ function verifyMagicLink(token) {
   // Marca come usato (monouso)
   db.prepare("UPDATE magic_links SET used = 1 WHERE id = ?").run(row.id);
 
-  return row.email;
+  return { email: row.email, upAddress: row.up_address || null };
 }
 
 // ── JWT access token ──────────────────────────────────────────────────────

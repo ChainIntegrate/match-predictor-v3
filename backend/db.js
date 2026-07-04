@@ -25,6 +25,7 @@ db.exec(`
     token      TEXT    NOT NULL UNIQUE,
     expires_at INTEGER NOT NULL,
     used       INTEGER NOT NULL DEFAULT 0,
+    up_address TEXT,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
