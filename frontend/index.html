@@ -317,6 +317,23 @@
   }
 
   /* ── Toggle ── */
+  .how-it-works-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(127, 224, 181, 0.1);
+    border: 1px solid var(--green-dim);
+    color: var(--green);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    margin: 14px 0 20px;
+    transition: background 0.15s;
+  }
+  .how-it-works-banner:hover { background: rgba(127, 224, 181, 0.18); }
+
   .toggle-bar {
     display: flex;
     background: var(--bg-mid);
@@ -651,6 +668,11 @@
       <h2 data-i18n="login_title">Predict. Win. Own.</h2>
       <p data-i18n="login_subtitle">Enter your email to receive a magic link. No password, no wallet required.</p>
 
+      <a href="/how-it-works" class="how-it-works-banner">
+        <span>💡</span>
+        <span data-i18n="how_it_works_banner">New here? See how it works in 1 minute →</span>
+      </a>
+
       <div class="toggle-bar" style="margin-bottom: 20px;">
         <button class="toggle-btn active" id="toggle-login" data-i18n="toggle_login">Login</button>
         <button class="toggle-btn" id="toggle-register" data-i18n="toggle_register">Register</button>
@@ -857,6 +879,7 @@
 <footer>
   MatchPredictor · <a href="https://chainintegrate.it" target="_blank">ChainIntegrate</a> · 
   <span data-i18n="footer_entertainment">Entertainment only · No gambling · No profit</span><br>
+  <a href="/how-it-works" data-i18n="footer_how">How it works</a> · 
   <a href="/privacy" data-i18n="footer_privacy">Privacy Policy</a> · 
   <a href="/terms" data-i18n="footer_terms">Terms of Service</a> · 
   © 2026 ChainIntegrate
@@ -925,7 +948,8 @@ const strings = {
     group_matches: "Group Matches",
     no_pred: "—",
     footer_entertainment: "Entertainment only · No gambling · No profit",
-    footer_privacy: "Privacy Policy", footer_terms: "Terms of Service",
+    footer_how: "How it works", footer_privacy: "Privacy Policy", footer_terms: "Terms of Service",
+    how_it_works_banner: "New here? See how it works in 1 minute →",
     no_matches: "No matches found.", loading: "Loading…",
     you_got_it: "You got it right!", result_was: "Final result:",
     your_prediction: "Your prediction:", didnt_predict: "You didn't predict this match.",
@@ -976,7 +1000,8 @@ const strings = {
     group_matches: "Partite del gruppo",
     no_pred: "—",
     footer_entertainment: "Solo intrattenimento · Nessun gioco d'azzardo · Nessun profitto",
-    footer_privacy: "Privacy Policy", footer_terms: "Termini di Servizio",
+    footer_how: "Come funziona", footer_privacy: "Privacy Policy", footer_terms: "Termini di Servizio",
+    how_it_works_banner: "Sei nuovo? Scopri come funziona in 1 minuto →",
     no_matches: "Nessuna partita trovata.", loading: "Caricamento…",
     you_got_it: "Hai indovinato!", result_was: "Risultato finale:",
     your_prediction: "Il tuo pronostico:", didnt_predict: "Non hai pronosticato questa partita.",
