@@ -327,6 +327,31 @@ app.post("/api/matches-data", async (req, res) => {
   res.json({ success: true, message: "Dati partite aggiornati" });
 });
 
+// ── Admin: elenco utenti registrati (solo owner, firma ERC-1271) ──────────
+// POST /api/admin/users  { message, signature }
+app.post("/api/admin/users", async (req, res) => {
+  const { message, signature } = req.body;
+  if (!message || !signature) {
+    return res.status(400).json({ success: false, error: "Body non valido" });
+  }
+
+  const timestampMatch = message.match(/(\d{13})/);
+  if (!timestampMatch) return res.status(400).json({ success: false, error: "Timestamp mancante nel messaggio" });
+  const ageMs = Date.now() - parseInt(timestampMatch[1], 10);
+  if (ageMs > 5 * 60 * 1000 || ageMs < -60 * 1000) {
+    return res.status(401).json({ success: false, error: "Firma scaduta" });
+  }
+
+  const isValid = await verifyOwnerSignature(message, signature);
+  if (!isValid) return res.status(403).json({ success: false, error: "Firma non autorizzata" });
+
+  const users = db.prepare(
+    "SELECT email, address, is_up, display_name, created_at FROM users ORDER BY created_at DESC"
+  ).all();
+
+  res.json({ success: true, users, total: users.length });
+});
+
 // ── Admin: pin JSON su IPFS via Pinata (solo owner, firma ERC-1271) ───────
 // POST /api/admin/pin-json  { message, signature, json, name }
 // Usato dal pannello admin per caricare i metadata LSP4 (collezione e per-token)

@@ -609,7 +609,7 @@
   <div class="header-left">
     <div>
       <div class="logo-text">
-        <img src="/matchpredictor_win_token.png" alt="MatchPredictor" style="height:92px; width:92px; border-radius:50%; vertical-align:middle; margin-right:8px;">
+        <img src="/matchpredictor_win_token.png" alt="MatchPredictor" style="height:32px; width:32px; border-radius:50%; vertical-align:middle; margin-right:8px;">
         MatchPredictor
       </div>
     </div>
@@ -727,18 +727,20 @@
         <div class="stat-label" data-i18n="stat_correct">Correct</div>
       </div>
       <div class="stat-box">
-        <div class="stat-num" id="stat-nfts">—</div>
-        <div class="stat-label" data-i18n="stat_nfts">NFTs won</div>
+        <div class="stat-num" id="stat-percentage">—</div>
+        <div class="stat-label" data-i18n="stat_percentage">Win %</div>
       </div>
     </div>
     <div id="my-predictions-list"></div>
-    <div class="section-title" id="nfts-section-title" style="display:none;" data-i18n="nfts_title">Your NFT prizes</div>
-    <div id="nfts-list"></div>
   </div>
 
   <!-- ── LEADERBOARD ── -->
   <div id="tab-leaderboard" style="display:none;">
     <div class="section-title" data-i18n="global_leaderboard">Global Leaderboard</div>
+    <div class="toggle-bar" style="margin-bottom:16px;">
+      <button class="toggle-btn active" data-lb-sort="wins" data-i18n="sort_by_wins">By wins</button>
+      <button class="toggle-btn" data-lb-sort="percentage" data-i18n="sort_by_percentage">By %</button>
+    </div>
     <div class="leaderboard-card" id="leaderboard-list"></div>
   </div>
 
@@ -908,8 +910,8 @@ const strings = {
     link_sent_sub: "We sent a magic link. Click it to log in. Valid for 15 minutes.",
     upcoming: "Upcoming", played: "Played",
     home_win: "Home", draw: "Draw", away_win: "Away",
-    stat_predicted: "Predicted", stat_correct: "Correct", stat_nfts: "NFTs won",
-    nfts_title: "Your NFT prizes",
+    stat_predicted: "Predicted", stat_correct: "Correct", stat_percentage: "Win %",
+    sort_by_wins: "By wins", sort_by_percentage: "By %",
     global_leaderboard: "Global Leaderboard",
     my_groups: "My Groups", join_group: "Join a group",
     join_btn: "Join group", create_group: "Create a group",
@@ -959,8 +961,8 @@ const strings = {
     link_sent_sub: "Abbiamo inviato un link magico. Cliccalo per accedere. Valido 15 minuti.",
     upcoming: "Da giocare", played: "Giocate",
     home_win: "Casa", draw: "Pareggio", away_win: "Ospite",
-    stat_predicted: "Pronostici", stat_correct: "Corretti", stat_nfts: "NFT vinti",
-    nfts_title: "I tuoi NFT premio",
+    stat_predicted: "Pronostici", stat_correct: "Corretti", stat_percentage: "% Vittorie",
+    sort_by_wins: "Per vittorie", sort_by_percentage: "Per %",
     global_leaderboard: "Classifica Globale",
     my_groups: "I miei gruppi", join_group: "Entra in un gruppo",
     join_btn: "Entra nel gruppo", create_group: "Crea un gruppo",
@@ -1404,7 +1406,7 @@ async function renderMyPredictions() {
   const nextId = await readContract.nextMatchId();
   const total = Number(nextId);
 
-  let predicted = 0, correct = 0;
+  let predicted = 0, correct = 0, resolvedCount = 0;
   const container = document.getElementById("my-predictions-list");
   container.innerHTML = `<div class="status">${t("loading")}</div>`;
 
@@ -1414,12 +1416,17 @@ async function renderMyPredictions() {
     if (pred === 0) continue;
     predicted++;
     const m = await readContract.getMatch(i);
-    if (m.resolved && Number(m.actualResult) === pred) correct++;
+    if (m.resolved) {
+      resolvedCount++;
+      if (Number(m.actualResult) === pred) correct++;
+    }
     items.push({ id: i, m, pred });
   }
 
   document.getElementById("stat-predicted").textContent = predicted;
   document.getElementById("stat-correct").textContent = correct;
+  document.getElementById("stat-percentage").textContent =
+    resolvedCount > 0 ? `${Math.round((correct / resolvedCount) * 100)}%` : "—";
 
   if (items.length === 0) {
     container.innerHTML = `<div class="status">${t("no_matches")}</div>`;
@@ -1431,34 +1438,16 @@ async function renderMyPredictions() {
       container.appendChild(card);
     }
   }
-
-  // NFT vinti
-  const claims = await fetchClaimEvents(currentUser.address);
-  document.getElementById("stat-nfts").textContent = claims.length;
-
-  if (claims.length > 0) {
-    document.getElementById("nfts-section-title").style.display = "block";
-    const nftsList = document.getElementById("nfts-list");
-    nftsList.innerHTML = "";
-    for (const { matchId, tokenId } of claims) {
-      const story = await readTokenStory(tokenId);
-      const badge = document.createElement("span");
-      badge.className = "nft-badge";
-      if (story) {
-        const [mId, home, away, result] = story.split("|");
-        badge.textContent = `🏆 Match #${mId} · ${home} vs ${away} · ${RESULT_LABELS[Number(result)] || result}`;
-      } else {
-        badge.textContent = `🏆 Token #${tokenId.slice(0, 10)}…`;
-      }
-      nftsList.appendChild(badge);
-    }
-  }
 }
 
 // ============================================================
 // RENDER: LEADERBOARD
 // ============================================================
-async function renderLeaderboard(addresses, containerId, userAddr) {
+// Sotto questa soglia la % non è abbastanza significativa da avere senso in classifica
+// (es. 1 pronostico corretto su 1 fatto = 100%, ma non è comparabile a chi ne ha fatti 20)
+const MIN_PREDICTIONS_FOR_PERCENTAGE = 3;
+
+async function renderLeaderboard(addresses, containerId, userAddr, sortMode = "wins") {
   await initEthers();
   const container = document.getElementById(containerId);
   container.innerHTML = `<div class="status">${t("loading")}</div>`;
@@ -1466,6 +1455,7 @@ async function renderLeaderboard(addresses, containerId, userAddr) {
   const nextId = await readContract.nextMatchId();
   const total = Number(nextId);
   const wins = new Map();
+  const totalPredictions = new Map();
 
   for (let i = 0; i < total; i++) {
     const m = await readContract.getMatch(i);
@@ -1475,11 +1465,24 @@ async function renderLeaderboard(addresses, containerId, userAddr) {
     events.forEach(e => {
       const addr = e.predictor.toLowerCase();
       if (addresses && !addresses.includes(addr)) return;
+      totalPredictions.set(addr, (totalPredictions.get(addr) || 0) + 1);
       if (e.result === actual) wins.set(addr, (wins.get(addr) || 0) + 1);
     });
   }
 
-  const ranked = [...wins.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20);
+  let entries = [...totalPredictions.keys()].map(addr => {
+    const w = wins.get(addr) || 0;
+    const p = totalPredictions.get(addr);
+    return { addr, wins: w, total: p, pct: p > 0 ? (w / p) * 100 : 0 };
+  });
+
+  if (sortMode === "percentage") {
+    entries = entries.filter(e => e.total >= MIN_PREDICTIONS_FOR_PERCENTAGE);
+    entries.sort((a, b) => b.pct - a.pct || b.wins - a.wins);
+  } else {
+    entries.sort((a, b) => b.wins - a.wins || b.pct - a.pct);
+  }
+  const ranked = entries.slice(0, 20);
 
   if (ranked.length === 0) {
     container.innerHTML = `<div class="status">${t("no_matches")}</div>`;
@@ -1489,7 +1492,7 @@ async function renderLeaderboard(addresses, containerId, userAddr) {
   // Recupera display names dal backend
   let displayNames = {};
   try {
-    const addrsParam = ranked.map(([addr]) => addr).join(",");
+    const addrsParam = ranked.map(e => e.addr).join(",");
     const dnRes = await api("GET", `/users/display-names?addresses=${addrsParam}`, null, false);
     if (dnRes.success) displayNames = dnRes.data;
   } catch {}
@@ -1499,17 +1502,17 @@ async function renderLeaderboard(addresses, containerId, userAddr) {
   }
 
   container.innerHTML = "";
-  ranked.forEach(([addr, count], i) => {
+  ranked.forEach((e, i) => {
     const row = document.createElement("div");
-    row.className = "leaderboard-row" + (addr === userAddr?.toLowerCase() ? " me" : "");
-    const displayName = displayNames[addr] || null;
+    row.className = "leaderboard-row" + (e.addr === userAddr?.toLowerCase() ? " me" : "");
+    const displayName = displayNames[e.addr] || null;
     row.innerHTML = `
       <span class="rank ${i < 3 ? "gold" : ""}">${i + 1}</span>
       <div style="flex:1;">
         ${displayName ? `<div class="lb-name">${displayName}</div>` : ""}
-        <div class="lb-addr">${addr.slice(0, 8)}…${addr.slice(-6)}</div>
+        <div class="lb-addr">${e.addr.slice(0, 8)}…${e.addr.slice(-6)}</div>
       </div>
-      <span class="lb-wins">${count} ${count === 1 ? t("win") : t("wins")}</span>
+      <span class="lb-wins">${e.wins} ${e.wins === 1 ? t("win") : t("wins")} · ${Math.round(e.pct)}%</span>
     `;
     container.appendChild(row);
   });
@@ -1780,7 +1783,7 @@ function showTab(tabName) {
 
   if (tabName === "matches") renderMatches(document.querySelector(".toggle-btn.active")?.dataset?.matchFilter || "upcoming");
   if (tabName === "my-predictions") renderMyPredictions();
-  if (tabName === "leaderboard") renderLeaderboard(null, "leaderboard-list", currentUser?.address);
+  if (tabName === "leaderboard") renderLeaderboard(null, "leaderboard-list", currentUser?.address, currentLeaderboardSort);
   if (tabName === "groups") {
     document.getElementById("group-detail").style.display = "none";
     document.getElementById("groups-list").style.display = "block";
@@ -2312,6 +2315,16 @@ document.getElementById("btn-save-manage-matches").addEventListener("click", asy
 });
 
 // Avvio
+let currentLeaderboardSort = "wins";
+document.querySelectorAll("[data-lb-sort]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll("[data-lb-sort]").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    currentLeaderboardSort = btn.dataset.lbSort;
+    renderLeaderboard(null, "leaderboard-list", currentUser?.address, currentLeaderboardSort);
+  });
+});
+
 init();
 </script>
 </body>

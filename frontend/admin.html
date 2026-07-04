@@ -309,6 +309,13 @@
     <div class="result" id="token-metadata-result"></div>
   </div>
 
+  <!-- SEZIONE 4C: Utenti registrati -->
+  <div class="card full">
+    <h2>👥 Registered users</h2>
+    <button class="btn-primary btn-full" id="btn-load-users">Load registered users</button>
+    <div class="result" id="users-result" style="max-height:400px; overflow-y:auto;"></div>
+  </div>
+
   <!-- SEZIONE 5: Test funzioni sponsor/oracle -->
   <div class="card full">
     <h2>🧪 Test sponsor / oracle functions</h2>
@@ -760,6 +767,51 @@
     // per /api/matches-data, invece di duplicare un secondo campo URL in UI.
     return document.getElementById("backend-url").value.replace(/\/matches-data\/?$/, "/admin/pin-json");
   }
+
+  function usersEndpoint() {
+    return document.getElementById("backend-url").value.replace(/\/matches-data\/?$/, "/admin/users");
+  }
+
+  document.getElementById("btn-load-users").addEventListener("click", async () => {
+    if (!signer) { alert("Connetti prima la UP."); return; }
+
+    const btn = document.getElementById("btn-load-users");
+    const resultEl = document.getElementById("users-result");
+    btn.disabled = true;
+    resultEl.className = "result";
+    resultEl.textContent = "Confirm signature in your UP extension…";
+
+    try {
+      const timestamp = Date.now();
+      const message = `MatchPredictor admin update - ${timestamp}`;
+      const signature = await signer.signMessage(message);
+
+      const res = await fetch(usersEndpoint(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, signature })
+      });
+      const payload = await res.json();
+      if (!payload.success) throw new Error(payload.error);
+
+      let output = `${payload.total} utenti registrati:\n\n`;
+      payload.users.forEach(u => {
+        const date = new Date(u.created_at * 1000).toLocaleString("it-IT");
+        output += `${u.email}\n`;
+        output += `  address: ${u.address}${u.is_up ? " (UP propria)" : " (EOA generata)"}\n`;
+        if (u.display_name) output += `  nome: ${u.display_name}\n`;
+        output += `  iscritto: ${date}\n\n`;
+      });
+
+      resultEl.textContent = output;
+      resultEl.className = "result ok";
+    } catch (err) {
+      resultEl.textContent = "❌ " + err.message;
+      resultEl.className = "result err";
+    } finally {
+      btn.disabled = false;
+    }
+  });
 
   document.getElementById("btn-scan-tokens").addEventListener("click", async () => {
     if (!readContract) { alert("Connetti prima la UP."); return; }
