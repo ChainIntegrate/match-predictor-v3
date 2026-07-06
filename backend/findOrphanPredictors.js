@@ -31,7 +31,7 @@ async function main() {
 
   console.log(`Utenti nel DB: ${dbUsers.length}\n`);
 
-  const provider = new ethers.JsonRpcProvider(RPC_URL);
+  const provider = new ethers.JsonRpcProvider(RPC_URL, undefined, { batchMaxCount: 1 });
   const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
 
   const events = await contract.queryFilter(contract.filters.PredictionMade(), 0, "latest");

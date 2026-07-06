@@ -203,7 +203,7 @@ async function main() {
 
       console.log(`  -> Risultato finale: ${matchInfo.homeTeam} ${matchInfo.score} ${matchInfo.awayTeam}`);
 
-      const tx = await contract.reportResult(matchId, matchInfo.result, { gasLimit: 200000 });
+      const tx = await contract.reportResult(matchId, matchInfo.result);
       console.log(`  -> Transazione reportResult inviata: ${tx.hash}`);
 
       const receipt = await tx.wait();

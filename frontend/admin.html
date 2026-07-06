@@ -377,7 +377,7 @@
   // ============================================================
   const CONFIG = {
     CONTRACT_ADDRESS: "0xE7EFa63E4923626274fbb18319aC4C57377c7BBf",
-    RPC_URL: "https://rpc.testnet.lukso.network",
+    RPC_URL: "https://explorer.execution.testnet.lukso.network/api/eth-rpc",
     CHAIN_ID_HEX: "0x1069",
     IPFS_GATEWAY: "https://api.universalprofile.cloud/ipfs/",
     FOOTBALL_DATA_PROXY: "https://playmatchpredictor.chainintegrate.it/api/upcoming-matches"
@@ -432,7 +432,7 @@
       contract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, signer);
       readContract = new ethers.Contract(
         CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI,
-        new ethers.JsonRpcProvider(CONFIG.RPC_URL)
+        new ethers.JsonRpcProvider(CONFIG.RPC_URL, undefined, { batchMaxCount: 1 })
       );
 
       // Verifica che sia owner
@@ -999,7 +999,7 @@
     const { ethers } = window;
     const key = document.getElementById("sponsor-key").value.trim();
     if (!key) throw new Error("Inserisci la sponsor private key.");
-    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
+    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, undefined, { batchMaxCount: 1 });
     const wallet = new ethers.Wallet(key, provider);
     return new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, wallet);
   }
@@ -1008,7 +1008,7 @@
     const { ethers } = window;
     const key = document.getElementById("oracle-key").value.trim();
     if (!key) throw new Error("Inserisci la oracle private key.");
-    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
+    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, undefined, { batchMaxCount: 1 });
     const wallet = new ethers.Wallet(key, provider);
     return new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, wallet);
   }
@@ -1031,7 +1031,7 @@
       resultEl.className = "result";
       resultEl.textContent = "Sending predictFor()…";
 
-      const tx = await c.predictFor(matchId, result, predictor);
+      const tx = await c.predictFor(matchId, result, predictor, { gasLimit: 300000 });
       await tx.wait();
 
       resultEl.textContent = `✅ predictFor() OK\nTx: ${tx.hash}`;
@@ -1058,7 +1058,7 @@
       resultEl.className = "result";
       resultEl.textContent = "Sending reportResult()…";
 
-      const tx = await c.reportResult(matchId, result);
+      const tx = await c.reportResult(matchId, result, { gasLimit: 200000 });
       await tx.wait();
 
       resultEl.textContent = `✅ reportResult() OK\nTx: ${tx.hash}`;
@@ -1085,7 +1085,7 @@
       resultEl.className = "result";
       resultEl.textContent = "Sending claimFor()…";
 
-      const tx = await c.claimFor(matchId, winner);
+      const tx = await c.claimFor(matchId, winner, { gasLimit: 1000000 });
       const receipt = await tx.wait();
 
       const { ethers } = window;

@@ -893,7 +893,7 @@
 // ============================================================
 const CONFIG = {
   API_BASE: "https://playmatchpredictor.chainintegrate.it/api",
-  RPC_URL: "https://rpc.testnet.lukso.network",
+  RPC_URL: "https://explorer.execution.testnet.lukso.network/api/eth-rpc",
   CONTRACT_ADDRESS: "0xE7EFa63E4923626274fbb18319aC4C57377c7BBf",
   TOKEN_STORY_KEY: "0xc345e2857e55742bc896212b499925391cc94c97152776066ccf64e4df74ee09"
 };
@@ -1159,7 +1159,10 @@ async function initEthers() {
   if (ethersLib && readContract) return;
   const { ethers } = await import("https://cdn.jsdelivr.net/npm/ethers@6.13.4/+esm");
   ethersLib = ethers;
-  const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL);
+  // batchMaxCount:1 disabilita il raggruppamento automatico delle chiamate —
+  // necessario perché il proxy RPC di Blockscout rifiuta payload grandi (413)
+  // quando ethers accorpa molte letture in un'unica richiesta HTTP.
+  const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, undefined, { batchMaxCount: 1 });
   readContract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, provider);
 }
 
