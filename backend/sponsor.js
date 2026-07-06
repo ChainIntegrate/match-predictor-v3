@@ -18,7 +18,7 @@ const CONTRACT_ABI = [
 const Result = { HOME_WIN: 1, DRAW: 2, AWAY_WIN: 3 };
 
 function getSponsorContract() {
-  const provider = new ethers.JsonRpcProvider(RPC_URL, undefined, { batchMaxCount: 1 });
+  const provider = new ethers.JsonRpcProvider(RPC_URL, 4201, { batchMaxCount: 1, staticNetwork: true });
   const wallet = new ethers.Wallet(SPONSOR_PRIVATE_KEY, provider);
   return new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, wallet);
 }

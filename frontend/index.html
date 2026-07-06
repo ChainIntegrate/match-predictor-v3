@@ -1162,7 +1162,7 @@ async function initEthers() {
   // batchMaxCount:1 disabilita il raggruppamento automatico delle chiamate —
   // necessario perché il proxy RPC di Blockscout rifiuta payload grandi (413)
   // quando ethers accorpa molte letture in un'unica richiesta HTTP.
-  const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, undefined, { batchMaxCount: 1 });
+  const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 4201, { batchMaxCount: 1, staticNetwork: true });
   readContract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, provider);
 }
 

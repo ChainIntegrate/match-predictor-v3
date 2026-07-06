@@ -37,7 +37,7 @@ function writeMatchesData(data) {
 
 // Verifica firma owner (ERC-1271) per endpoint admin sensibili
 async function verifyOwnerSignature(message, signature) {
-  const provider = new ethers.JsonRpcProvider(process.env.LUKSO_RPC_URL, undefined, { batchMaxCount: 1 });
+  const provider = new ethers.JsonRpcProvider(process.env.LUKSO_RPC_URL, 4201, { batchMaxCount: 1, staticNetwork: true });
   const upAbi = ["function isValidSignature(bytes32 hash, bytes memory signature) external view returns (bytes4)"];
   const up = new ethers.Contract(process.env.OWNER_UP_ADDRESS, upAbi, provider);
   const messageHash = ethers.hashMessage(message);
