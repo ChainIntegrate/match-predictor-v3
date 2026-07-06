@@ -709,13 +709,14 @@ app.put("/api/groups/:inviteCode/matches", requireAuth, (req, res) => {
   res.json({ success: true, message: "Partite del gruppo aggiornate" });
 });
 
-// POST /api/groups/:inviteCode/freeze — congela la classifica finale (solo creatore)
-// Lo snapshot viene calcolato dal frontend (stesso posto dove si leggono già i dati
-// on-chain) e passato qui solo per essere salvato. Un gruppo congelato non conta
-// più contro i limiti di creazione/partecipazione, e la sua classifica smette di
-// aggiornarsi: resta il risultato finale, per sempre.
+// POST /api/groups/:inviteCode/freeze — congela l'INSIEME delle partite (solo creatore)
+// Importante: si fissa QUALI matchId contano da qui in avanti (niente più
+// nuove partite aggiunte), NON i risultati. Se una di queste partite non è
+// ancora risolta al momento del congelamento, il frontend continuerà a
+// leggerne il risultato dal vivo finché non viene giocata — altrimenti una
+// partita in corso resterebbe "congelata" a un conteggio sbagliato per sempre.
 app.post("/api/groups/:inviteCode/freeze", requireAuth, (req, res) => {
-  const { snapshot } = req.body;
+  const { matchIds } = req.body;
   const group = db.prepare("SELECT * FROM groups WHERE invite_code = ?").get(req.params.inviteCode.toUpperCase());
   if (!group) return res.status(404).json({ success: false, error: "Gruppo non trovato" });
   if (group.created_by !== req.user.userId) {
@@ -724,12 +725,12 @@ app.post("/api/groups/:inviteCode/freeze", requireAuth, (req, res) => {
   if (group.frozen_at) {
     return res.status(409).json({ success: false, error: "Il gruppo è già congelato" });
   }
-  if (!Array.isArray(snapshot)) {
-    return res.status(400).json({ success: false, error: "snapshot deve essere un array" });
+  if (!Array.isArray(matchIds)) {
+    return res.status(400).json({ success: false, error: "matchIds deve essere un array" });
   }
 
-  db.prepare("UPDATE groups SET frozen_at = unixepoch(), frozen_snapshot = ? WHERE id = ?")
-    .run(JSON.stringify(snapshot), group.id);
+  db.prepare("UPDATE groups SET frozen_at = unixepoch(), frozen_match_ids = ? WHERE id = ?")
+    .run(JSON.stringify(matchIds), group.id);
 
   res.json({ success: true, message: "Gruppo congelato" });
 });

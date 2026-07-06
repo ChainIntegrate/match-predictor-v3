@@ -1584,12 +1584,12 @@ async function renderGroups() {
 }
 
 let currentGroupIsAdmin = false;
-let currentGroupFrozenSnapshot = null;
+let currentGroupFrozenMatchIds = null;
 
 async function showGroupDetail(code, name, memberCount, isAdmin) {
   currentGroupCode = code;
   currentGroupIsAdmin = !!isAdmin;
-  currentGroupFrozenSnapshot = null;
+  currentGroupFrozenMatchIds = null;
   document.getElementById("group-detail-name").textContent = name;
   document.getElementById("group-detail-meta").textContent = `${memberCount} members · Code: ${code}`;
   document.getElementById("manage-matches-panel").style.display = "none";
@@ -1607,8 +1607,8 @@ async function showGroupDetail(code, name, memberCount, isAdmin) {
   if (!res.success) return;
 
   const isFrozen = !!res.group?.frozen_at;
-  if (isFrozen && res.group.frozen_snapshot) {
-    try { currentGroupFrozenSnapshot = JSON.parse(res.group.frozen_snapshot); } catch {}
+  if (isFrozen && res.group.frozen_match_ids) {
+    try { currentGroupFrozenMatchIds = JSON.parse(res.group.frozen_match_ids); } catch {}
   }
 
   document.getElementById("btn-manage-matches").style.display = (currentGroupIsAdmin && !isFrozen) ? "inline-block" : "none";
@@ -1632,18 +1632,18 @@ async function showGroupDetail(code, name, memberCount, isAdmin) {
   await renderGroupMatches(members, "upcoming");
 }
 
-// Calcola la classifica di un gruppo (vittorie per membro, partite escluse rispettate).
-// Riusata sia per il rendering live sia per lo snapshot al congelamento.
-async function computeGroupStandings(members, excludedIds) {
+// Calcola la classifica di un gruppo per un insieme ESPLICITO di matchId.
+// I risultati vengono sempre letti dal vivo dalla chain — anche per un gruppo
+// congelato, le uniche partite "fisse" sono quali matchId contano, non i
+// risultati: se una di quelle partite non era ancora risolta al momento del
+// congelamento, deve continuare a contare correttamente una volta finita.
+async function computeGroupStandings(members, matchIds) {
   await initEthers();
-  const nextId = await readContract.nextMatchId();
-  const total = Number(nextId);
 
   const winsMap = new Map();
   members.forEach(m => winsMap.set(m.address.toLowerCase(), 0));
 
-  for (let i = 0; i < total; i++) {
-    if (excludedIds.has(i)) continue;
+  for (const i of matchIds) {
     try {
       const m = await readContract.getMatch(i);
       if (!m.resolved) continue;
@@ -1663,6 +1663,18 @@ async function computeGroupStandings(members, excludedIds) {
       return { address, wins, displayName: member?.display_name || null };
     })
     .sort((a, b) => b.wins - a.wins);
+}
+
+// Costruisce la lista di matchId "attivi" per un gruppo NON congelato:
+// tutte le partite esistenti meno quelle escluse a mano.
+async function liveGroupMatchIds(excludedIds) {
+  await initEthers();
+  const total = Number(await readContract.nextMatchId());
+  const ids = [];
+  for (let i = 0; i < total; i++) {
+    if (!excludedIds.has(i)) ids.push(i);
+  }
+  return ids;
 }
 
 function renderStandingsRows(container, ranked, userAddr) {
@@ -1687,20 +1699,21 @@ async function renderGroupLeaderboard(members, containerId, userAddr) {
   const container = document.getElementById(containerId);
   container.innerHTML = `<div class="status">${t("loading")}</div>`;
 
-  // Gruppo congelato: nessuna lettura on-chain, si mostra lo snapshot salvato.
-  if (currentGroupFrozenSnapshot) {
-    renderStandingsRows(container, currentGroupFrozenSnapshot, userAddr);
-    return;
+  let matchIds;
+  if (currentGroupFrozenMatchIds) {
+    // Congelato: l'insieme delle partite è fisso, ma i risultati si leggono
+    // comunque dal vivo (potrebbero essercene di non ancora risolte).
+    matchIds = currentGroupFrozenMatchIds;
+  } else {
+    let excludedIds = new Set();
+    try {
+      const exRes = await api("GET", `/groups/${currentGroupCode}/leaderboard`);
+      if (exRes.success) excludedIds = new Set((exRes.excludedMatches || []).map(Number));
+    } catch {}
+    matchIds = await liveGroupMatchIds(excludedIds);
   }
 
-  // Partite escluse per questo gruppo — non devono contare nel punteggio
-  let excludedIds = new Set();
-  try {
-    const exRes = await api("GET", `/groups/${currentGroupCode}/leaderboard`);
-    if (exRes.success) excludedIds = new Set((exRes.excludedMatches || []).map(Number));
-  } catch {}
-
-  const ranked = await computeGroupStandings(members, excludedIds);
+  const ranked = await computeGroupStandings(members, matchIds);
   renderStandingsRows(container, ranked, userAddr);
 }
 
@@ -1711,20 +1724,23 @@ async function renderGroupMatches(members, filter) {
 
   const dataRes = await api("GET", "/matches-data", null, false);
   const md = dataRes.data || { matches: [] };
-  const nextId = Number(await readContract.nextMatchId());
   const now = Date.now();
 
-  // Partite escluse per questo gruppo — non devono comparire nella lista
-  let excludedIds = new Set();
-  try {
-    const exRes = await api("GET", `/groups/${currentGroupCode}/leaderboard`);
-    if (exRes.success) excludedIds = new Set((exRes.excludedMatches || []).map(Number));
-  } catch {}
+  let matchIdsToShow;
+  if (currentGroupFrozenMatchIds) {
+    matchIdsToShow = currentGroupFrozenMatchIds;
+  } else {
+    let excludedIds = new Set();
+    try {
+      const exRes = await api("GET", `/groups/${currentGroupCode}/leaderboard`);
+      if (exRes.success) excludedIds = new Set((exRes.excludedMatches || []).map(Number));
+    } catch {}
+    matchIdsToShow = await liveGroupMatchIds(excludedIds);
+  }
 
   // Carica tutte le partite on-chain
   const allMatches = [];
-  for (let i = 0; i < nextId; i++) {
-    if (excludedIds.has(i)) continue;
+  for (const i of matchIdsToShow) {
     try {
       const m = await readContract.getMatch(i);
       allMatches.push({ id: i, teamHome: m.teamHome, teamAway: m.teamAway,
@@ -2287,9 +2303,12 @@ document.getElementById("btn-freeze-group").addEventListener("click", async () =
     const exRes = await api("GET", `/groups/${currentGroupCode}/leaderboard`);
     if (exRes.success) excludedIds = new Set((exRes.excludedMatches || []).map(Number));
 
-    const snapshot = await computeGroupStandings(membersRes.members, excludedIds);
+    // Fissiamo QUALI partite contano da qui in avanti (niente più nuove),
+    // ma NON i risultati: quelle non ancora giocate continueranno a essere
+    // conteggiate correttamente man mano che vengono risolte.
+    const matchIds = await liveGroupMatchIds(excludedIds);
 
-    const res = await api("POST", `/groups/${currentGroupCode}/freeze`, { snapshot });
+    const res = await api("POST", `/groups/${currentGroupCode}/freeze`, { matchIds });
     if (!res.success) throw new Error(res.error);
 
     await showGroupDetail(currentGroupCode, document.getElementById("group-detail-name").textContent,
