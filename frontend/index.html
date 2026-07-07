@@ -972,7 +972,7 @@ const strings = {
     you_got_it: "You got it right!", result_was: "Final result:",
     your_prediction: "Your prediction:", didnt_predict: "You didn't predict this match.",
     prediction_closed: "Prediction window closed.",
-    claim_nft: "Claim your NFT", already_claimed: "NFT claimed ✓",
+    claim_nft: "Claim your NFT", already_claimed: "NFT claimed ✓", claim_pending: "🏆 Prize NFT being assigned…",
     connect_to_predict: "Log in to make predictions.",
     wins: "wins", win: "win",
     no_pred: "—",
@@ -1028,7 +1028,7 @@ const strings = {
     you_got_it: "Hai indovinato!", result_was: "Risultato finale:",
     your_prediction: "Il tuo pronostico:", didnt_predict: "Non hai pronosticato questa partita.",
     prediction_closed: "Finestra pronostici chiusa.",
-    claim_nft: "Riscatta il tuo NFT", already_claimed: "NFT riscattato ✓",
+    claim_nft: "Riscatta il tuo NFT", already_claimed: "NFT riscattato ✓", claim_pending: "🏆 Premio NFT in assegnazione…",
     connect_to_predict: "Accedi per fare pronostici.",
     wins: "vittorie", win: "vittoria",
     no_pred: "—",
@@ -1376,31 +1376,11 @@ function buildMatchCard(m, extra, myPred, claimed) {
     }
     div.appendChild(banner);
 
-    if (won && !claimed) {
-      const claimBtn = document.createElement("button");
-      claimBtn.className = "claim-btn";
-      claimBtn.textContent = t("claim_nft");
-      claimBtn.onclick = async () => {
-        claimBtn.disabled = true;
-        claimBtn.textContent = "…";
-        try {
-          const res = await api("POST", "/claim", { matchId: m.id });
-          if (res.success) {
-            claimBtn.textContent = t("already_claimed");
-            claimBtn.className = "claim-btn btn-ghost";
-          } else {
-            claimBtn.disabled = false;
-            claimBtn.textContent = res.error || "Error";
-          }
-        } catch { claimBtn.disabled = false; claimBtn.textContent = "Error"; }
-      };
-      div.appendChild(claimBtn);
-    } else if (won && claimed) {
-      const claimedBtn = document.createElement("button");
-      claimedBtn.className = "claim-btn btn-ghost";
-      claimedBtn.textContent = t("already_claimed");
-      claimedBtn.disabled = true;
-      div.appendChild(claimedBtn);
+    if (won) {
+      const claimInfo = document.createElement("div");
+      claimInfo.className = "match-meta";
+      claimInfo.textContent = claimed ? t("already_claimed") : t("claim_pending");
+      div.appendChild(claimInfo);
     }
 
     return div;
@@ -1410,7 +1390,9 @@ function buildMatchCard(m, extra, myPred, claimed) {
   if (!open) {
     const hint = document.createElement("div");
     hint.className = "match-meta";
-    hint.textContent = t("prediction_closed");
+    hint.textContent = myPred !== 0
+      ? `${t("prediction_closed")} — ${t("your_prediction")} ${RESULT_LABELS[myPred]}`
+      : t("prediction_closed");
     div.appendChild(hint);
     return div;
   }
