@@ -12,9 +12,21 @@
   a { color: #3498db; }
   .highlight { background: #fff8e1; border-left: 4px solid #f39c12; padding: 12px 16px; margin: 16px 0; border-radius: 4px; }
   footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #eee; font-size: 13px; color: #888; }
+  .lang-toggle { display: flex; gap: 8px; margin-bottom: 24px; }
+  .lang-btn { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .lang-btn.active { background: #1a3328; color: #fff; border-color: #1a3328; }
+  [data-lang="it"] { display: none; }
 </style>
 </head>
 <body>
+
+<div class="lang-toggle">
+  <button class="lang-btn active" id="btn-en">English</button>
+  <button class="lang-btn" id="btn-it">Italiano</button>
+</div>
+
+<!-- ============================== EN ============================== -->
+<div data-lang="en">
 
 <h1>Terms of Service</h1>
 <p class="meta">Last updated: July 2026 · MatchPredictor by ChainIntegrate</p>
@@ -77,6 +89,92 @@
   MatchPredictor · ChainIntegrate · Entertainment only · No gambling · No profit
   · <a href="/privacy">Privacy Policy</a>
 </footer>
+
+</div>
+
+<!-- ============================== IT ============================== -->
+<div data-lang="it">
+
+<h1>Termini di Servizio</h1>
+<p class="meta">Ultimo aggiornamento: luglio 2026 · MatchPredictor by ChainIntegrate</p>
+
+<div class="highlight">
+  <strong>Importante:</strong> MatchPredictor è una piattaforma gratuita, solo di intrattenimento. Non ci sono premi in denaro, nessuna quota di iscrizione, e nessuna forma di gioco d'azzardo. I premi NFT sono oggetti da collezione digitali senza valore monetario.
+</div>
+
+<h2>1. Sulla piattaforma</h2>
+<p>MatchPredictor è un gioco di pronostici sportivi non commerciale, costruito sulla blockchain LUKSO e gestito da ChainIntegrate come progetto personale. La piattaforma permette agli utenti di pronosticare i risultati delle partite e ricevere NFT da collezione come ricordo dei pronostici corretti.</p>
+
+<h2>2. Nessun gioco d'azzardo — nessun valore monetario</h2>
+<p>MatchPredictor <strong>non è una piattaforma di scommesse</strong>. Nello specifico:</p>
+<ul>
+  <li>Non viene scommesso né pagato denaro, criptovaluta o token di valore monetario per partecipare</li>
+  <li>Non vengono assegnati premi in denaro</li>
+  <li>I premi NFT sono oggetti da collezione digitali emessi come attestazione di un pronostico corretto. Non hanno valore monetario e non possono essere scambiati con denaro tramite questa piattaforma</li>
+  <li>La piattaforma non genera ricavi e non ha scopo commerciale</li>
+</ul>
+
+<h2>3. Requisiti di idoneità</h2>
+<p>Devi avere almeno 18 anni per usare MatchPredictor. Registrandoti, confermi di soddisfare questo requisito.</p>
+
+<h2>4. Account utente</h2>
+<ul>
+  <li>Ci si registra usando il proprio indirizzo email. È consentito un solo account per persona.</li>
+  <li>Sei responsabile della sicurezza di accesso al tuo account email.</li>
+  <li>Ci riserviamo il diritto di sospendere account che violano questi termini.</li>
+</ul>
+
+<h2>5. Blockchain e NFT</h2>
+<ul>
+  <li>I pronostici vengono registrati sulla blockchain LUKSO e sono permanentemente pubblici.</li>
+  <li>I premi NFT vengono coniati sulla blockchain LUKSO. Una volta coniati, non possono essere revocati da noi.</li>
+  <li>Le transazioni blockchain sono irreversibili per progettazione.</li>
+  <li>Non siamo responsabili per eventuali perdite derivanti da errori negli indirizzi blockchain forniti dall'utente (es. per richieste di trasferimento NFT).</li>
+</ul>
+
+<h2>6. Gruppi e classifiche</h2>
+<ul>
+  <li>Gli utenti possono creare fino a 3 gruppi e partecipare a un massimo di 5 gruppi in totale.</li>
+  <li>I gruppi sono privati e ad invito, tramite un link condivisibile.</li>
+  <li>Il gestore della piattaforma si riserva il diritto di rimuovere gruppi che violano questi termini.</li>
+</ul>
+
+<h2>7. Disponibilità e modifiche</h2>
+<p>MatchPredictor è fornito "così com'è", senza garanzie di uptime o continuità. Possiamo modificare, sospendere o interrompere la piattaforma in qualsiasi momento senza preavviso.</p>
+<p>Calendario partite e risultati dipendono da dati di terze parti (football-data.org). Non siamo responsabili per errori o ritardi nella comunicazione dei risultati.</p>
+
+<h2>8. Limitazione di responsabilità</h2>
+<p>ChainIntegrate e MatchPredictor non sono responsabili per perdite o danni derivanti dall'uso di questa piattaforma, inclusi a titolo esemplificativo: perdita di accesso a un account, risultati di pronostico errati, o errori nel trasferimento di NFT.</p>
+
+<h2>9. Proprietà intellettuale</h2>
+<p>La piattaforma MatchPredictor, incluso il suo codice e design, è creata da ChainIntegrate. I dati delle partite sono forniti da football-data.org secondo i loro termini d'uso.</p>
+
+<h2>10. Contatti</h2>
+<p>Per domande su questi termini: <a href="mailto:info@chainintegrate.it">info@chainintegrate.it</a></p>
+
+<footer>
+  MatchPredictor · ChainIntegrate · Solo intrattenimento · Nessun gioco d'azzardo · Nessun profitto
+  · <a href="/privacy">Privacy Policy</a>
+</footer>
+
+</div>
+
+<script>
+  document.getElementById("btn-en").addEventListener("click", () => setLang("en"));
+  document.getElementById("btn-it").addEventListener("click", () => setLang("it"));
+
+  function setLang(lang) {
+    document.querySelectorAll("[data-lang]").forEach(el => {
+      el.style.display = el.dataset.lang === lang ? "block" : "none";
+    });
+    document.getElementById("btn-en").classList.toggle("active", lang === "en");
+    document.getElementById("btn-it").classList.toggle("active", lang === "it");
+    document.documentElement.lang = lang;
+    localStorage.setItem("mp-legal-lang", lang);
+  }
+
+  setLang(localStorage.getItem("mp-legal-lang") || "en");
+</script>
 
 </body>
 </html>

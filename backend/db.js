@@ -16,6 +16,7 @@ db.exec(`
     is_up                 INTEGER NOT NULL DEFAULT 0,
     display_name          TEXT,
     terms_accepted        INTEGER NOT NULL DEFAULT 0,
+    marketing_consent     INTEGER NOT NULL DEFAULT 0,
     created_at            INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
@@ -26,6 +27,7 @@ db.exec(`
     expires_at INTEGER NOT NULL,
     used       INTEGER NOT NULL DEFAULT 0,
     up_address TEXT,
+    marketing_consent INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
 

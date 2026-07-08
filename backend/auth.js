@@ -30,7 +30,7 @@ const transporter = nodemailer.createTransport({
 /// Se upAddress è presente (già validata come LSP0 dal chiamante), viene
 /// salvata sul magic link e usata in fase di verify per creare l'utente
 /// senza generare una EOA dedicata.
-async function sendMagicLink(email, upAddress = null) {
+async function sendMagicLink(email, upAddress = null, marketingConsent = false) {
   // Cancella eventuali link precedenti non usati per questa email
   db.prepare("DELETE FROM magic_links WHERE email = ? AND used = 0").run(email);
 
@@ -38,15 +38,15 @@ async function sendMagicLink(email, upAddress = null) {
   const expiresAt = Math.floor(Date.now() / 1000) + MAGIC_LINK_EXPIRY_MINUTES * 60;
 
   db.prepare(
-    "INSERT INTO magic_links (email, token, expires_at, up_address) VALUES (?, ?, ?, ?)"
-  ).run(email, token, expiresAt, upAddress);
+    "INSERT INTO magic_links (email, token, expires_at, up_address, marketing_consent) VALUES (?, ?, ?, ?, ?)"
+  ).run(email, token, expiresAt, upAddress, marketingConsent ? 1 : 0);
 
   const link = `${process.env.FRONTEND_URL}/auth?token=${token}`;
 
   await transporter.sendMail({
     from: `"MatchPredictor" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
     to: email,
-    subject: "Il tuo link di accesso a MatchPredictor",
+    subject: "Il tuo link di accesso a MatchPredictor / Your MatchPredictor login link",
     html: `
       <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
         <h2>Accedi a MatchPredictor</h2>
@@ -63,6 +63,24 @@ async function sendMagicLink(email, upAddress = null) {
         ">Accedi ora</a>
         <p style="color: #666; font-size: 13px;">
           Se non hai richiesto tu questo link, ignoralo.
+        </p>
+
+        <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+
+        <h2>Sign in to MatchPredictor</h2>
+        <p>Click the link below to sign in. Valid for ${MAGIC_LINK_EXPIRY_MINUTES} minutes.</p>
+        <a href="${link}" style="
+          display: inline-block;
+          background: #3498db;
+          color: white;
+          padding: 12px 24px;
+          border-radius: 8px;
+          text-decoration: none;
+          font-weight: bold;
+          margin: 16px 0;
+        ">Sign in now</a>
+        <p style="color: #666; font-size: 13px;">
+          If you didn't request this link, just ignore this email.
         </p>
       </div>
     `
@@ -83,7 +101,72 @@ function verifyMagicLink(token) {
   // Marca come usato (monouso)
   db.prepare("UPDATE magic_links SET used = 1 WHERE id = ?").run(row.id);
 
-  return { email: row.email, upAddress: row.up_address || null };
+  return { email: row.email, upAddress: row.up_address || null, marketingConsent: !!row.marketing_consent };
+}
+
+/// Notifica via email gli utenti che hanno dato il consenso quando vengono
+/// aggiunte nuove partite (solo quelle davvero nuove, non l'intero elenco).
+async function sendNewMatchesNotification(newMatches) {
+  if (!newMatches || newMatches.length === 0) return;
+
+  const users = db.prepare("SELECT email FROM users WHERE marketing_consent = 1").all();
+  if (users.length === 0) return;
+
+  const matchListHtml = newMatches.map(m => `${m.teamHome} vs ${m.teamAway}`).join("<br>");
+  const link = process.env.FRONTEND_URL;
+
+  for (const user of users) {
+    try {
+      await transporter.sendMail({
+        from: `"MatchPredictor" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+        to: user.email,
+        subject: "Nuove partite da pronosticare su MatchPredictor / New matches to predict",
+        html: `
+          <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+            <h2>Nuove partite disponibili</h2>
+            <p>Sono state aggiunte queste nuove partite:</p>
+            <p>${matchListHtml}</p>
+            <a href="${link}" style="
+              display: inline-block;
+              background: #3498db;
+              color: white;
+              padding: 12px 24px;
+              border-radius: 8px;
+              text-decoration: none;
+              font-weight: bold;
+              margin: 16px 0;
+            ">Vai a MatchPredictor</a>
+            <p style="color: #666; font-size: 12px;">
+              Ricevi questa email perché hai scelto di essere avvisato di novità.
+              Puoi disattivarlo in qualsiasi momento dal tuo profilo.
+            </p>
+
+            <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+
+            <h2>New matches available</h2>
+            <p>These new matches have just been added:</p>
+            <p>${matchListHtml}</p>
+            <a href="${link}" style="
+              display: inline-block;
+              background: #3498db;
+              color: white;
+              padding: 12px 24px;
+              border-radius: 8px;
+              text-decoration: none;
+              font-weight: bold;
+              margin: 16px 0;
+            ">Go to MatchPredictor</a>
+            <p style="color: #666; font-size: 12px;">
+              You're getting this because you opted in to update emails.
+              You can turn it off anytime from your account bar on the site.
+            </p>
+          </div>
+        `
+      });
+    } catch (err) {
+      console.error(`Errore invio notifica nuove partite a ${user.email}:`, err.message);
+    }
+  }
 }
 
 // ── JWT access token ──────────────────────────────────────────────────────
@@ -170,6 +253,7 @@ function requireAuth(req, res, next) {
 module.exports = {
   sendMagicLink,
   verifyMagicLink,
+  sendNewMatchesNotification,
   generateAccessToken,
   generateRefreshToken,
   rotateRefreshToken,

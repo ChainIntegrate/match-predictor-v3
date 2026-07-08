@@ -651,6 +651,10 @@
     <span class="user-address" id="user-address"></span>
   </div>
   <div style="display:flex; gap:8px; align-items:center;">
+    <label class="btn-ghost btn-sm" style="display:flex; align-items:center; gap:5px; cursor:pointer; margin:0;" title="Occasional update emails">
+      <input type="checkbox" id="toggle-marketing" style="width:auto; margin:0;">
+      <span data-i18n="marketing_toggle_label">📧 Updates</span>
+    </label>
     <button class="btn-ghost btn-sm" id="btn-edit-name" onclick="document.getElementById('modal-display-name').style.display='flex'" title="Edit display name">✏️</button>
     <button class="btn-ghost btn-sm" id="btn-logout" data-i18n="logout">Logout</button>
   </div>
@@ -716,6 +720,10 @@
             <span data-i18n="terms_accept">I confirm this is an entertainment platform with no monetary prizes. I accept the</span>
             <a href="/terms" target="_blank" data-i18n="terms_link">Terms of Service</a>.
           </label>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="check-marketing">
+          <label for="check-marketing" data-i18n="marketing_consent">Send me an email only when there's something worth telling — new competitions, standout wins. Nothing frequent, unsubscribe anytime.</label>
         </div>
         <button class="btn-primary" id="btn-register" disabled data-i18n="register_btn">Create account</button>
         <div class="status" id="register-status" style="display:none;"></div>
@@ -942,6 +950,8 @@ const strings = {
     privacy_accept2: "and consent to the processing of my email for login purposes.",
     terms_accept: "I confirm this is an entertainment platform with no monetary prizes. I accept the",
     terms_link: "Terms of Service",
+    marketing_consent: "Send me an email only when there's something worth telling — new competitions, standout wins. Nothing frequent, unsubscribe anytime.",
+    marketing_toggle_label: "📧 Updates",
     send_link: "Send magic link",
     link_sent_title: "Check your email!",
     link_sent_sub: "We sent a magic link. Click it to log in. Valid for 15 minutes.",
@@ -996,6 +1006,8 @@ const strings = {
     privacy_accept2: "e consento al trattamento della mia email per l'accesso.",
     terms_accept: "Confermo che questa è una piattaforma di intrattenimento senza premi in denaro. Accetto i",
     terms_link: "Termini di servizio",
+    marketing_consent: "Scrivetemi solo quando c'è qualcosa che vale la pena dire — nuove competizioni, vittorie importanti. Niente di frequente, disiscrizione quando vuoi.",
+    marketing_toggle_label: "📧 Novità",
     send_link: "Invia link magico",
     toggle_login: "Accedi", toggle_register: "Registrati",
     register_btn: "Crea account",
@@ -1897,6 +1909,9 @@ async function init() {
         localStorage.setItem("mp_user", JSON.stringify(currentUser));
         document.getElementById("user-display-name").textContent = profileRes.user.display_name;
       }
+      if (profileRes.success) {
+        document.getElementById("toggle-marketing").checked = !!profileRes.user.marketing_consent;
+      }
     } catch {}
 
     // Primo accesso via magic link senza nome impostato: chiediamolo subito,
@@ -2107,7 +2122,10 @@ btnRegister.addEventListener("click", async () => {
   btnRegister.disabled = true;
   btnRegister.textContent = "…";
   const email = registerEmailInput.value.trim().toLowerCase();
-  const body = validatedUpAddress ? { email, upAddress: validatedUpAddress } : { email };
+  const marketingConsent = document.getElementById("check-marketing").checked;
+  const body = validatedUpAddress
+    ? { email, upAddress: validatedUpAddress, marketingConsent }
+    : { email, marketingConsent };
   const res = await api("POST", "/auth/request-link", body, false);
   if (res.success) {
     document.getElementById("register-form").style.display = "none";
@@ -2145,6 +2163,10 @@ document.getElementById("floating-confirm-btn").addEventListener("click", confir
 
 // Logout
 document.getElementById("btn-logout").addEventListener("click", logout);
+
+document.getElementById("toggle-marketing").addEventListener("change", async (e) => {
+  await api("POST", "/user/marketing-consent", { consent: e.target.checked });
+});
 
 // Nav tabs
 document.querySelectorAll(".nav-tab").forEach(btn => {

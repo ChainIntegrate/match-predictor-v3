@@ -5,7 +5,7 @@ const cors = require("cors");
 const db = require("./db");
 const { generateUserWallet } = require("./keys");
 const { validateUPAddress } = require("./upValidator");
-const { sendMagicLink, verifyMagicLink, generateAccessToken, generateRefreshToken, rotateRefreshToken, requireAuth } = require("./auth");
+const { sendMagicLink, verifyMagicLink, sendNewMatchesNotification, generateAccessToken, generateRefreshToken, rotateRefreshToken, requireAuth } = require("./auth");
 const { predictFor, predictBatchFor, claimFor } = require("./sponsor");
 const { ethers } = require("ethers");
 const fs = require("fs");
@@ -71,7 +71,7 @@ app.get("/api/auth/validate-up", async (req, res) => {
 // ── Auth: richiedi magic link ─────────────────────────────────────────────
 // POST /api/auth/request-link  { email, upAddress? }
 app.post("/api/auth/request-link", async (req, res) => {
-  const { email, upAddress } = req.body;
+  const { email, upAddress, marketingConsent } = req.body;
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ success: false, error: "Email non valida" });
   }
@@ -90,7 +90,7 @@ app.post("/api/auth/request-link", async (req, res) => {
   }
 
   try {
-    await sendMagicLink(email.toLowerCase().trim(), validatedUP);
+    await sendMagicLink(email.toLowerCase().trim(), validatedUP, !!marketingConsent);
     res.json({ success: true, message: "Link inviato. Controlla la tua email." });
   } catch (err) {
     console.error("Errore invio magic link:", err.message);
@@ -107,7 +107,7 @@ app.get("/api/auth/verify", async (req, res) => {
   const verified = verifyMagicLink(token);
   if (!verified) return res.status(401).json({ success: false, error: "Link non valido o scaduto" });
 
-  const { email, upAddress } = verified;
+  const { email, upAddress, marketingConsent } = verified;
   let user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
 
   if (!user) {
@@ -124,14 +124,14 @@ app.get("/api/auth/verify", async (req, res) => {
         return res.status(409).json({ success: false, error: "Indirizzo UP già associato a un altro account" });
       }
       db.prepare(
-        "INSERT INTO users (email, address, encrypted_private_key, is_up, terms_accepted) VALUES (?, ?, NULL, 1, 1)"
-      ).run(email, check.address);
+        "INSERT INTO users (email, address, encrypted_private_key, is_up, terms_accepted, marketing_consent) VALUES (?, ?, NULL, 1, 1, ?)"
+      ).run(email, check.address, marketingConsent ? 1 : 0);
     } else {
       // Primo accesso senza UP: genera una EOA dedicata
       const { address, encryptedPrivateKey } = generateUserWallet();
       db.prepare(
-        "INSERT INTO users (email, address, encrypted_private_key, terms_accepted) VALUES (?, ?, ?, 1)"
-      ).run(email, address, encryptedPrivateKey);
+        "INSERT INTO users (email, address, encrypted_private_key, terms_accepted, marketing_consent) VALUES (?, ?, ?, 1, ?)"
+      ).run(email, address, encryptedPrivateKey, marketingConsent ? 1 : 0);
     }
     user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
   }
@@ -173,7 +173,7 @@ app.post("/api/auth/refresh", async (req, res) => {
 // ── Utente: profilo ───────────────────────────────────────────────────────
 // GET /api/user/profile
 app.get("/api/user/profile", requireAuth, (req, res) => {
-  const user = db.prepare("SELECT id, email, address, is_up, created_at FROM users WHERE id = ?").get(req.user.userId);
+  const user = db.prepare("SELECT id, email, address, is_up, display_name, marketing_consent, created_at FROM users WHERE id = ?").get(req.user.userId);
   if (!user) return res.status(404).json({ success: false, error: "Utente non trovato" });
   res.json({ success: true, user });
 });
@@ -190,6 +190,14 @@ app.post("/api/user/display-name", requireAuth, (req, res) => {
 
   db.prepare("UPDATE users SET display_name = ? WHERE id = ?").run(name || null, req.user.userId);
   res.json({ success: true, displayName: name || null });
+});
+
+// ── Utente: consenso email opzionali (attivabile/disattivabile in ogni momento) ──
+// POST /api/user/marketing-consent  { consent: true|false }
+app.post("/api/user/marketing-consent", requireAuth, (req, res) => {
+  const { consent } = req.body;
+  db.prepare("UPDATE users SET marketing_consent = ? WHERE id = ?").run(consent ? 1 : 0, req.user.userId);
+  res.json({ success: true, marketingConsent: !!consent });
 });
 
 // ── Utente: collega UP ────────────────────────────────────────────────────
@@ -323,8 +331,23 @@ app.post("/api/matches-data", async (req, res) => {
   const isValid = await verifyOwnerSignature(message, signature);
   if (!isValid) return res.status(403).json({ success: false, error: "Firma non autorizzata" });
 
+  // Confronta con i dati precedenti per capire quali partite sono davvero nuove
+  // (non tutte quelle nell'array, solo quelle mai viste prima) — solo per quelle
+  // ha senso avvisare gli utenti iscritti alle novità.
+  const oldData = readMatchesData();
+  const oldIds = new Set((oldData.matches || []).map(m => m.contractMatchId));
+  const newMatches = matches.filter(m => !oldIds.has(m.contractMatchId));
+
   writeMatchesData({ matches, matchIdMapping });
-  res.json({ success: true, message: "Dati partite aggiornati" });
+
+  // Non blocchiamo la risposta al pannello admin in attesa dell'invio email
+  if (newMatches.length > 0) {
+    sendNewMatchesNotification(newMatches).catch(err =>
+      console.error("Errore invio notifica nuove partite:", err.message)
+    );
+  }
+
+  res.json({ success: true, message: "Dati partite aggiornati", newMatchesFound: newMatches.length });
 });
 
 // ── Admin: elenco utenti registrati (solo owner, firma ERC-1271) ──────────

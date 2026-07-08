@@ -11,9 +11,21 @@
   .meta { color: #666; font-size: 14px; margin-bottom: 32px; }
   a { color: #3498db; }
   footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #eee; font-size: 13px; color: #888; }
+  .lang-toggle { display: flex; gap: 8px; margin-bottom: 24px; }
+  .lang-btn { border: 1px solid #ccc; background: #fff; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .lang-btn.active { background: #1a3328; color: #fff; border-color: #1a3328; }
+  [data-lang="it"] { display: none; }
 </style>
 </head>
 <body>
+
+<div class="lang-toggle">
+  <button class="lang-btn active" id="btn-en">English</button>
+  <button class="lang-btn" id="btn-it">Italiano</button>
+</div>
+
+<!-- ============================== EN ============================== -->
+<div data-lang="en">
 
 <h1>Privacy Policy</h1>
 <p class="meta">Last updated: July 2026 · MatchPredictor by ChainIntegrate</p>
@@ -25,11 +37,14 @@
 
 <h2>2. What data we collect</h2>
 <ul>
-  <li><strong>Email address</strong> — used solely to send you a magic login link. We do not use it for marketing or share it with third parties.</li>
+  <li><strong>Email address</strong> — used to send you a magic login link, and, only if you explicitly opt in, occasional emails about new competitions and standout wins. We never use it for anything else and never share it with third parties.</li>
   <li><strong>Blockchain address</strong> — a unique wallet address generated for your account (or your Universal Profile address if you choose to link one). This is stored to associate your predictions with your identity on-chain.</li>
   <li><strong>Predictions</strong> — your match predictions are recorded on the LUKSO blockchain and are publicly visible by design (this is a core feature of the platform).</li>
   <li><strong>Session tokens</strong> — JWT access and refresh tokens stored locally on your device to keep you logged in.</li>
 </ul>
+
+<h2>2bis. Optional update emails</h2>
+<p>At registration, you can choose to receive occasional emails when there's something worth telling — new competitions starting, standout wins. This is entirely optional, off by default, and never bundled with the mandatory account emails (like your login link). You can turn it on or off at any time from your account bar on the site, no need to contact us.</p>
 
 <h2>3. What we do NOT collect</h2>
 <ul>
@@ -82,6 +97,101 @@
   MatchPredictor · ChainIntegrate · Entertainment only · No gambling · No profit
   · <a href="/terms">Terms of Service</a>
 </footer>
+
+</div>
+
+<!-- ============================== IT ============================== -->
+<div data-lang="it">
+
+<h1>Privacy Policy</h1>
+<p class="meta">Ultimo aggiornamento: luglio 2026 · MatchPredictor by ChainIntegrate</p>
+
+<p>Questa Privacy Policy spiega come MatchPredictor ("noi", "nostro"), gestito da ChainIntegrate, raccoglie, usa e protegge i tuoi dati personali quando usi la piattaforma su <strong>playmatchpredictor.chainintegrate.it</strong>.</p>
+
+<h2>1. Chi siamo</h2>
+<p>MatchPredictor è un gioco di pronostici non commerciale, solo di intrattenimento, costruito sulla blockchain LUKSO. È gestito da ChainIntegrate come progetto personale, senza scopo commerciale e senza premi in denaro.</p>
+
+<h2>2. Quali dati raccogliamo</h2>
+<ul>
+  <li><strong>Indirizzo email</strong> — usato per inviarti il link di accesso, e, solo se scegli esplicitamente di attivarlo, email occasionali su nuove competizioni e vittorie da segnalare. Non lo usiamo mai per altro e non lo condividiamo mai con terze parti.</li>
+  <li><strong>Indirizzo blockchain</strong> — un indirizzo wallet univoco generato per il tuo account (o l'indirizzo della tua Universal Profile, se scegli di collegarne una). Viene salvato per associare i tuoi pronostici alla tua identità on-chain.</li>
+  <li><strong>Pronostici</strong> — i tuoi pronostici sulle partite vengono registrati sulla blockchain LUKSO e sono pubblicamente visibili per progettazione (è una caratteristica fondamentale della piattaforma).</li>
+  <li><strong>Token di sessione</strong> — token di accesso e refresh JWT salvati localmente sul tuo dispositivo per mantenerti connesso.</li>
+</ul>
+
+<h2>2bis. Email di aggiornamento opzionali</h2>
+<p>In fase di registrazione, puoi scegliere di ricevere email occasionali quando c'è qualcosa che vale la pena dire — nuove competizioni in partenza, vittorie importanti. È del tutto opzionale, disattivato di default, e mai unito alle email obbligatorie dell'account (come il link di accesso). Puoi attivarlo o disattivarlo in qualsiasi momento dalla barra del tuo account sul sito, senza bisogno di contattarci.</p>
+
+<h2>3. Cosa NON raccogliamo</h2>
+<ul>
+  <li>Nessuna password</li>
+  <li>Nessuna informazione di pagamento</li>
+  <li>Nessun cookie di tracciamento o analytics</li>
+  <li>Nessuna registrazione dell'indirizzo IP</li>
+  <li>Nessun dato venduto o condiviso con inserzionisti</li>
+</ul>
+
+<h2>4. Come usiamo i tuoi dati</h2>
+<ul>
+  <li>Per inviarti un link di accesso monouso via email</li>
+  <li>Per associare i tuoi pronostici al tuo account</li>
+  <li>Per mostrare la tua posizione nella classifica della piattaforma</li>
+</ul>
+
+<h2>5. Conservazione e sicurezza dei dati</h2>
+<p>La tua email e l'indirizzo blockchain associato sono conservati in un database sicuro sul nostro server (VPS Aruba, Italia). La chiave privata del tuo indirizzo wallet generato è conservata cifrata con AES-256-GCM. Non conserviamo mai chiavi private in chiaro.</p>
+<p>I link di accesso magici scadono dopo 15 minuti e possono essere usati una sola volta.</p>
+
+<h2>6. Conservazione dei dati</h2>
+<p>Conserviamo i tuoi dati finché il tuo account è attivo. Puoi richiedere la cancellazione del tuo account e dei dati associati in qualsiasi momento contattandoci a <a href="mailto:info@chainintegrate.it">info@chainintegrate.it</a>.</p>
+<p>Nota: i pronostici registrati sulla blockchain non possono essere cancellati, perché i record blockchain sono permanenti per progettazione.</p>
+
+<h2>7. I tuoi diritti (GDPR)</h2>
+<p>Se ti trovi nell'Unione Europea, hai il diritto di:</p>
+<ul>
+  <li>Accedere ai dati personali che conserviamo su di te</li>
+  <li>Richiedere la correzione di dati inesatti</li>
+  <li>Richiedere la cancellazione dei dati del tuo account (esclusi i record on-chain)</li>
+  <li>Opporti al trattamento dei tuoi dati</li>
+</ul>
+<p>Per esercitare uno di questi diritti, contattaci a <a href="mailto:info@chainintegrate.it">info@chainintegrate.it</a>.</p>
+
+<h2>8. Servizi di terze parti</h2>
+<ul>
+  <li><strong>football-data.org</strong> — usato per recuperare i risultati delle partite. Nessun dato personale viene condiviso con loro.</li>
+  <li><strong>Blockchain LUKSO</strong> — pronostici e premi NFT sono registrati su una blockchain pubblica. Questi dati sono permanentemente pubblici.</li>
+  <li><strong>Pinata / IPFS</strong> — usato per salvare i metadata degli NFT. Nessun dato personale viene salvato su IPFS.</li>
+</ul>
+
+<h2>9. Modifiche a questa policy</h2>
+<p>Potremmo aggiornare questa Privacy Policy di tanto in tanto. Le modifiche saranno pubblicate su questa pagina con una data aggiornata.</p>
+
+<h2>10. Contatti</h2>
+<p>Per qualsiasi domanda sulla privacy: <a href="mailto:info@chainintegrate.it">info@chainintegrate.it</a></p>
+
+<footer>
+  MatchPredictor · ChainIntegrate · Solo intrattenimento · Nessun gioco d'azzardo · Nessun profitto
+  · <a href="/terms">Termini di Servizio</a>
+</footer>
+
+</div>
+
+<script>
+  document.getElementById("btn-en").addEventListener("click", () => setLang("en"));
+  document.getElementById("btn-it").addEventListener("click", () => setLang("it"));
+
+  function setLang(lang) {
+    document.querySelectorAll("[data-lang]").forEach(el => {
+      el.style.display = el.dataset.lang === lang ? "block" : "none";
+    });
+    document.getElementById("btn-en").classList.toggle("active", lang === "en");
+    document.getElementById("btn-it").classList.toggle("active", lang === "it");
+    document.documentElement.lang = lang;
+    localStorage.setItem("mp-legal-lang", lang);
+  }
+
+  setLang(localStorage.getItem("mp-legal-lang") || "en");
+</script>
 
 </body>
 </html>
