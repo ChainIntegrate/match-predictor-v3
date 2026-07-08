@@ -990,7 +990,8 @@ const strings = {
     no_groups: "You're not in any groups yet.",
     group_created: "Group created!", group_joined: "You joined the group!",
     invite_copied: "Invite link copied!",
-    predictions_made: "predictions made"
+    predictions_made: "predictions made",
+    guessed_correctly: "guessed it right", nobody_guessed: "nobody guessed it right 😅"
   },
   it: {
     powered_by: "Powered by",
@@ -1049,7 +1050,8 @@ const strings = {
     no_groups: "Non sei ancora in nessun gruppo.",
     group_created: "Gruppo creato!", group_joined: "Sei entrato nel gruppo!",
     invite_copied: "Link invito copiato!",
-    predictions_made: "pronostici"
+    predictions_made: "pronostici",
+    guessed_correctly: "ha indovinato", nobody_guessed: "nessuno ha indovinato 😅"
   }
 };
 
@@ -1368,13 +1370,23 @@ function buildMatchCard(m, extra, myPred, claimed) {
       }).catch(() => scoreEl.remove());
   }
 
-  // Conteggio predizioni
+  // Conteggio predizioni + percentuale di chi ha indovinato (solo a risoluzione avvenuta)
   const countEl = document.createElement("div");
   countEl.className = "pred-count";
   countEl.textContent = t("loading");
   div.appendChild(countEl);
   fetchPredictionEvents(m.id).then(events => {
-    countEl.textContent = `${events.length} ${t("predictions_made")}`;
+    const total = events.length;
+    if (m.resolved && total > 0) {
+      const actual = Number(m.actualResult);
+      const correctCount = events.filter(e => e.result === actual).length;
+      const pct = Math.round((correctCount / total) * 100);
+      countEl.textContent = correctCount === 0
+        ? `${total} ${t("predictions_made")} · ${t("nobody_guessed")}`
+        : `${total} ${t("predictions_made")} · ${pct}% ${t("guessed_correctly")}`;
+    } else {
+      countEl.textContent = `${total} ${t("predictions_made")}`;
+    }
   });
 
   // Bottoni pronostico o risultato
