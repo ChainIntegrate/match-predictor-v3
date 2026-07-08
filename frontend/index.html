@@ -1474,7 +1474,10 @@ async function renderMyPredictions() {
     const pred = Number(await readContract.predictions(i, currentUser.address));
     if (pred === 0) continue;
     predicted++;
-    const m = await readContract.getMatch(i);
+    const raw = await readContract.getMatch(i);
+    const m = { id: i, teamHome: raw.teamHome, teamAway: raw.teamAway,
+      predictionDeadline: raw.predictionDeadline, resolved: raw.resolved,
+      actualResult: raw.actualResult, exists: raw.exists };
     if (m.resolved) {
       resolvedCount++;
       if (Number(m.actualResult) === pred) correct++;
