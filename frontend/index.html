@@ -961,6 +961,7 @@ const strings = {
     sort_by_wins: "By wins", sort_by_percentage: "By %",
     predicting_title: "Registering your prediction…",
     predicting_subtitle: "This is being written to the blockchain — it can take up to a minute. Please don't close this page.",
+    gateway_timeout_message: "The server took too long to respond. If you just submitted a prediction, it may have gone through anyway — check back in a moment before trying again.",
     global_leaderboard: "Global Leaderboard",
     my_groups: "My Groups", join_group: "Join a group",
     join_btn: "Join group", create_group: "Create a group",
@@ -1019,6 +1020,7 @@ const strings = {
     sort_by_wins: "Per vittorie", sort_by_percentage: "Per %",
     predicting_title: "Registrazione del pronostico in corso…",
     predicting_subtitle: "Stiamo scrivendo sulla blockchain — può richiedere fino a un minuto. Non chiudere questa pagina.",
+    gateway_timeout_message: "Il server ha impiegato troppo tempo a rispondere. Se hai appena inviato un pronostico, potrebbe comunque essere andato a buon fine — controlla tra un momento prima di riprovare.",
     global_leaderboard: "Classifica Globale",
     my_groups: "I miei gruppi", join_group: "Entra in un gruppo",
     join_btn: "Entra nel gruppo", create_group: "Crea un gruppo",
@@ -1098,11 +1100,24 @@ async function api(method, path, body, useAuth = true) {
         method, headers,
         body: body ? JSON.stringify(body) : undefined
       });
-      return retry.json();
+      return safeParseJson(retry);
     }
   }
 
-  return res.json();
+  return safeParseJson(res);
+}
+
+// Il server (o un proxy davanti a lui) a volte risponde con una pagina di
+// errore HTML invece di JSON — tipicamente un timeout del gateway su
+// operazioni lente come le transazioni blockchain. In quel caso NON significa
+// che l'operazione sia fallita: potrebbe essere comunque andata a buon fine
+// sulla chain nel frattempo, il server ha solo impiegato troppo a rispondere.
+async function safeParseJson(res) {
+  try {
+    return await res.json();
+  } catch {
+    return { success: false, error: t("gateway_timeout_message"), gatewayError: true };
+  }
 }
 
 async function tryRefresh() {
