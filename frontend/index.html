@@ -742,6 +742,7 @@
 
   <!-- ── MATCHES ── -->
   <div id="tab-matches" style="display:none;">
+    <div id="competition-filter" class="toggle-bar" style="margin-bottom:14px; flex-wrap:wrap;"></div>
     <div class="toggle-bar">
       <button class="toggle-btn active" data-match-filter="upcoming" data-i18n="upcoming">Upcoming</button>
       <button class="toggle-btn" data-match-filter="played" data-i18n="played">Played</button>
@@ -765,6 +766,7 @@
         <div class="stat-label" data-i18n="stat_percentage">Win %</div>
       </div>
     </div>
+    <div id="my-predictions-by-league"></div>
     <div id="my-predictions-list"></div>
   </div>
 
@@ -875,6 +877,9 @@
   ✓ Confirm <span id="floating-confirm-count">0</span> predictions
 </button>
 
+<!-- Torna su -->
+<button id="btn-back-to-top" title="Back to top" style="display:none; position:fixed; bottom:24px; right:20px; z-index:60; width:46px; height:46px; border-radius:50%; background:var(--card); border:1px solid var(--line); color:var(--green); font-size:20px; cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,0.4);">↑</button>
+
 <!-- Modale: attesa conferma pronostico sulla blockchain -->
 <div id="modal-predicting" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); z-index:200; align-items:center; justify-content:center;">
   <div style="background:var(--card); border:1px solid var(--line); border-radius:16px; padding:32px; max-width:340px; width:90%; margin:auto; text-align:center;">
@@ -956,7 +961,8 @@ const strings = {
     send_link: "Send magic link",
     link_sent_title: "Check your email!",
     link_sent_sub: "We sent a magic link. Click it to log in. Valid for 15 minutes.",
-    upcoming: "Upcoming", played: "Played",
+    upcoming: "Upcoming", played: "Played", all_competitions: "All competitions",
+    by_competition: "By competition",
     home_win: "Home", draw: "Draw", away_win: "Away",
     stat_predicted: "Predicted", stat_correct: "Correct", stat_percentage: "Win %",
     sort_by_wins: "By wins", sort_by_percentage: "By %",
@@ -1016,7 +1022,8 @@ const strings = {
     register_btn: "Crea account",
     link_sent_title: "Controlla la tua email!",
     link_sent_sub: "Abbiamo inviato un link magico. Cliccalo per accedere. Valido 15 minuti.",
-    upcoming: "Da giocare", played: "Giocate",
+    upcoming: "Da giocare", played: "Giocate", all_competitions: "Tutte le competizioni",
+    by_competition: "Per competizione",
     home_win: "Casa", draw: "Pareggio", away_win: "Ospite",
     stat_predicted: "Pronostici", stat_correct: "Corretti", stat_percentage: "% Vittorie",
     sort_by_wins: "Per vittorie", sort_by_percentage: "Per %",
@@ -1212,18 +1219,39 @@ async function initEthers() {
   readContract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, provider);
 }
 
-async function loadMatchesFromChain() {
+// Esegue le chiamate in parallelo ma a gruppi limitati, invece che tutte
+// insieme senza controllo — un proxy RPC condiviso come Blockscout regge
+// meglio 5-6 richieste alla volta che 50+ sparate nello stesso istante.
+async function mapWithConcurrencyLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+async function loadMatchesFromChain(idsToFetch = null) {
   await initEthers();
-  const nextId = await readContract.nextMatchId();
-  const total = Number(nextId);
-  const results = [];
-  for (let i = 0; i < total; i++) {
+  let ids;
+  if (idsToFetch) {
+    ids = idsToFetch;
+  } else {
+    const nextId = await readContract.nextMatchId();
+    ids = Array.from({ length: Number(nextId) }, (_, i) => i);
+  }
+
+  const results = await mapWithConcurrencyLimit(ids, 6, async (i) => {
     try {
       const m = await readContract.getMatch(i);
-      results.push({ id: i, teamHome: m.teamHome, teamAway: m.teamAway, predictionDeadline: m.predictionDeadline, resolved: m.resolved, actualResult: m.actualResult, exists: m.exists });
-    } catch {}
-  }
-  return results;
+      return { id: i, teamHome: m.teamHome, teamAway: m.teamAway, predictionDeadline: m.predictionDeadline, resolved: m.resolved, actualResult: m.actualResult, exists: m.exists };
+    } catch { return null; }
+  });
+  return results.filter(Boolean);
 }
 
 async function fetchPredictionEvents(matchId) {
@@ -1281,6 +1309,40 @@ function flagImg(team, crestUrl) {
 // ============================================================
 // RENDER: MATCHES TAB
 // ============================================================
+const COMPETITION_NAMES = {
+  WC: "FIFA World Cup", SA: "Serie A", PL: "Premier League",
+  BL1: "Bundesliga", PD: "La Liga", FL1: "Ligue 1",
+  DED: "Eredivisie", CL: "UEFA Champions League"
+};
+
+function matchCompetition(matchId) {
+  const extra = matchesData.matches.find(x => x.contractMatchId === matchId);
+  return extra?.competition || "WC";
+}
+
+function populateCompetitionFilter() {
+  const container = document.getElementById("competition-filter");
+  const previousValue = container.dataset.selected || "all";
+
+  const present = [...new Set(matchesData.matches.map(m => m.competition || "WC"))];
+  // Mondiale sempre in fondo se presente: è testnet-only, destinato a sparire in mainnet
+  present.sort((a, b) => {
+    if (a === "WC") return 1;
+    if (b === "WC") return -1;
+    return (COMPETITION_NAMES[a] || a).localeCompare(COMPETITION_NAMES[b] || b);
+  });
+
+  const selected = (previousValue === "all" || present.includes(previousValue)) ? previousValue : "all";
+  container.dataset.selected = selected;
+
+  const buttons = [`<button class="toggle-btn${selected === "all" ? " active" : ""}" data-competition="all">${t("all_competitions")}</button>`]
+    .concat(present.map(code =>
+      `<button class="toggle-btn${selected === code ? " active" : ""}" data-competition="${code}">${COMPETITION_NAMES[code] || code}</button>`
+    ));
+
+  container.innerHTML = buttons.join("");
+}
+
 async function renderMatches(filter = "upcoming") {
   const container = document.getElementById("matches-list");
   container.innerHTML = `<div class="status">${t("loading")}</div>`;
@@ -1289,15 +1351,28 @@ async function renderMatches(filter = "upcoming") {
     // Carica matches-data dal backend (per footballDataMatchId e label)
     const dataRes = await api("GET", "/matches-data", null, false);
     matchesData = dataRes.data || { matches: [] };
+    populateCompetitionFilter();
+    const selectedCompetition = document.getElementById("competition-filter").dataset.selected || "all";
+
+    // Se è selezionata una competizione specifica, limitiamo la lettura dalla
+    // chain solo ai suoi matchId — invece di leggere sempre tutte le partite
+    // di ogni competizione e filtrare dopo, il che diventa lento man mano che
+    // se ne aggiungono altre.
+    const idsToFetch = selectedCompetition === "all"
+      ? null
+      : matchesData.matches
+          .filter(m => (m.competition || "WC") === selectedCompetition)
+          .map(m => m.contractMatchId);
 
     // Carica stato on-chain
-    onChainMatches = await loadMatchesFromChain();
+    onChainMatches = await loadMatchesFromChain(idsToFetch);
 
     const now = Date.now();
     let filtered = onChainMatches.filter(m => {
       const deadline = Number(m.predictionDeadline) * 1000;
-      if (filter === "upcoming") return !m.resolved && now < deadline;
-      if (filter === "played") return m.resolved || now >= deadline;
+      if (filter === "upcoming" && (m.resolved || now >= deadline)) return false;
+      if (filter === "played" && !(m.resolved || now >= deadline)) return false;
+      if (selectedCompetition !== "all" && matchCompetition(m.id) !== selectedCompetition) return false;
       return true;
     });
 
@@ -1477,6 +1552,15 @@ function buildMatchCard(m, extra, myPred, claimed) {
 async function renderMyPredictions() {
   if (!isLoggedIn()) return;
 
+  // matchesData potrebbe non essere ancora caricato se l'utente arriva qui
+  // senza prima passare dal tab Partite — lo carichiamo per sicurezza.
+  if (!matchesData.matches || matchesData.matches.length === 0) {
+    try {
+      const dataRes = await api("GET", "/matches-data", null, false);
+      matchesData = dataRes.data || { matches: [] };
+    } catch {}
+  }
+
   await initEthers();
   const nextId = await readContract.nextMatchId();
   const total = Number(nextId);
@@ -1484,6 +1568,8 @@ async function renderMyPredictions() {
   let predicted = 0, correct = 0, resolvedCount = 0;
   const container = document.getElementById("my-predictions-list");
   container.innerHTML = `<div class="status">${t("loading")}</div>`;
+
+  const byLeague = {}; // { WC: {predicted, correct, resolvedCount}, SA: {...}, ... }
 
   const items = [];
   for (let i = 0; i < total; i++) {
@@ -1494,9 +1580,18 @@ async function renderMyPredictions() {
     const m = { id: i, teamHome: raw.teamHome, teamAway: raw.teamAway,
       predictionDeadline: raw.predictionDeadline, resolved: raw.resolved,
       actualResult: raw.actualResult, exists: raw.exists };
+
+    const comp = matchCompetition(i);
+    if (!byLeague[comp]) byLeague[comp] = { predicted: 0, correct: 0, resolvedCount: 0 };
+    byLeague[comp].predicted++;
+
     if (m.resolved) {
       resolvedCount++;
-      if (Number(m.actualResult) === pred) correct++;
+      byLeague[comp].resolvedCount++;
+      if (Number(m.actualResult) === pred) {
+        correct++;
+        byLeague[comp].correct++;
+      }
     }
     items.push({ id: i, m, pred });
   }
@@ -1505,6 +1600,30 @@ async function renderMyPredictions() {
   document.getElementById("stat-correct").textContent = correct;
   document.getElementById("stat-percentage").textContent =
     resolvedCount > 0 ? `${Math.round((correct / resolvedCount) * 100)}%` : "—";
+
+  // Riepilogo per lega — il Mondiale è escluso di proposito: esiste solo per
+  // la durata della testnet, non avrebbe senso continuare a mostrarlo come
+  // una "lega" separata una volta passati a mainnet.
+  const leagueContainer = document.getElementById("my-predictions-by-league");
+  const leagues = Object.keys(byLeague).filter(c => c !== "WC" && byLeague[c].predicted > 0);
+  if (leagues.length === 0) {
+    leagueContainer.innerHTML = "";
+  } else {
+    leagueContainer.innerHTML = `
+      <div class="section-title" style="margin-top:8px;">${t("by_competition")}</div>
+      <div class="stats-row" style="flex-wrap:wrap;">
+        ${leagues.map(comp => {
+          const s = byLeague[comp];
+          const pct = s.resolvedCount > 0 ? Math.round((s.correct / s.resolvedCount) * 100) : null;
+          return `
+            <div class="stat-box" style="min-width:120px;">
+              <div class="stat-num" style="font-size:20px;">${pct !== null ? pct + "%" : "—"}</div>
+              <div class="stat-label">${COMPETITION_NAMES[comp] || comp}</div>
+              <div class="stat-label" style="opacity:0.7;">${s.correct}/${s.resolvedCount} · ${s.predicted} ${t("predictions_made")}</div>
+            </div>`;
+        }).join("")}
+      </div>`;
+  }
 
   if (items.length === 0) {
     container.innerHTML = `<div class="status">${t("no_matches")}</div>`;
@@ -1900,7 +2019,7 @@ function showTab(tabName) {
     btn.classList.toggle("active", btn.dataset.tab === tabName);
   });
 
-  if (tabName === "matches") renderMatches(document.querySelector(".toggle-btn.active")?.dataset?.matchFilter || "upcoming");
+  if (tabName === "matches") renderMatches(document.querySelector("#tab-matches .toggle-btn[data-match-filter].active")?.dataset?.matchFilter || "upcoming");
   if (tabName === "my-predictions") renderMyPredictions();
   if (tabName === "leaderboard") renderLeaderboard(null, "leaderboard-list", currentUser?.address, currentLeaderboardSort);
   if (tabName === "groups") {
@@ -2195,6 +2314,15 @@ document.getElementById("btn-skip-display-name").addEventListener("click", hideD
 // Floating confirm
 document.getElementById("floating-confirm-btn").addEventListener("click", confirmPredictions);
 
+// Torna su: compare solo dopo un certo scroll, per non intasare la vista in cima alla pagina
+const backToTopBtn = document.getElementById("btn-back-to-top");
+window.addEventListener("scroll", () => {
+  backToTopBtn.style.display = window.scrollY > 500 ? "block" : "none";
+});
+backToTopBtn.addEventListener("click", () => {
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
 // Logout
 document.getElementById("btn-logout").addEventListener("click", logout);
 
@@ -2211,10 +2339,21 @@ document.querySelectorAll(".nav-tab").forEach(btn => {
 document.querySelectorAll(".toggle-btn").forEach(btn => {
   btn.addEventListener("click", () => {
     if (!btn.dataset.matchFilter) return; // ignora il toggle login/register
-    document.querySelectorAll("#tab-matches .toggle-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll("#tab-matches .toggle-btn[data-match-filter]").forEach(b => b.classList.remove("active"));
     btn.classList.add("active");
     renderMatches(btn.dataset.matchFilter);
   });
+});
+
+document.getElementById("competition-filter").addEventListener("click", (e) => {
+  const btn = e.target.closest(".toggle-btn");
+  if (!btn) return;
+  const container = document.getElementById("competition-filter");
+  container.dataset.selected = btn.dataset.competition;
+  container.querySelectorAll(".toggle-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  const activeFilter = document.querySelector("#tab-matches .toggle-btn[data-match-filter].active")?.dataset?.matchFilter || "upcoming";
+  renderMatches(activeFilter);
 });
 
 // Groups: join
