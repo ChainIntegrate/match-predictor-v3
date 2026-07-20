@@ -456,17 +456,24 @@ app.get("/api/match-score/:id", async (req, res) => {
 });
 
 // ── Proxy partite programmate ─────────────────────────────────────────────
-// GET /api/upcoming-matches?dateFrom=&dateTo=
+// GET /api/upcoming-matches?dateFrom=&dateTo=&competition=WC
 app.get("/api/upcoming-matches", async (req, res) => {
   const { dateFrom, dateTo } = req.query;
+  const competition = (req.query.competition || "WC").trim().toUpperCase();
   const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
   if (!dateFrom || !dateTo || !dateRegex.test(dateFrom) || !dateRegex.test(dateTo)) {
     return res.status(400).json({ success: false, error: "dateFrom e dateTo richiesti (YYYY-MM-DD)" });
   }
+  // Whitelist di codici competizione noti, per evitare di inoltrare a football-data.org
+  // un valore arbitrario preso dalla query string senza controllo.
+  const KNOWN_COMPETITIONS = ["WC", "SA", "PL", "BL1", "PD", "FL1", "DED", "CL"];
+  if (!KNOWN_COMPETITIONS.includes(competition)) {
+    return res.status(400).json({ success: false, error: `Competizione sconosciuta: ${competition}` });
+  }
 
   try {
     const response = await fetch(
-      `https://api.football-data.org/v4/competitions/WC/matches?dateFrom=${dateFrom}&dateTo=${dateTo}&status=SCHEDULED`,
+      `https://api.football-data.org/v4/competitions/${competition}/matches?dateFrom=${dateFrom}&dateTo=${dateTo}&status=SCHEDULED`,
       { headers: { "X-Auth-Token": process.env.FOOTBALL_DATA_API_KEY } }
     );
     if (!response.ok) return res.status(502).json({ success: false, error: `football-data.org: ${response.status}` });
@@ -478,8 +485,11 @@ app.get("/api/upcoming-matches", async (req, res) => {
         footballDataMatchId: m.id,
         teamHome: m.homeTeam.name,
         teamAway: m.awayTeam.name,
+        teamHomeCrest: m.homeTeam.crest || null,
+        teamAwayCrest: m.awayTeam.crest || null,
         kickoff: m.utcDate,
-        group: m.group || m.stage || "Match"
+        group: m.group || m.stage || "Match",
+        competition
       }));
 
     res.json({ success: true, data: known });
