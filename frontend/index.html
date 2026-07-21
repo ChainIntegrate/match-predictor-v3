@@ -772,32 +772,39 @@
 
   <!-- ── MY PREDICTIONS ── -->
   <div id="tab-my-predictions" style="display:none;">
-    <div class="stats-row">
-      <div class="stat-box">
-        <div class="stat-num" id="stat-predicted">—</div>
-        <div class="stat-label" data-i18n="stat_predicted">Predicted</div>
+    <div id="predictions-competition-picker"></div>
+    <div id="predictions-view" style="display:none;">
+      <button class="btn-ghost btn-sm" id="btn-back-to-competitions-predictions" style="margin-bottom:14px;">← <span data-i18n="back_to_competitions">Back to competitions</span></button>
+      <div class="stats-row">
+        <div class="stat-box">
+          <div class="stat-num" id="stat-predicted">—</div>
+          <div class="stat-label" data-i18n="stat_predicted">Predicted</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-num" id="stat-correct">—</div>
+          <div class="stat-label" data-i18n="stat_correct">Correct</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-num" id="stat-percentage">—</div>
+          <div class="stat-label" data-i18n="stat_percentage">Win %</div>
+        </div>
       </div>
-      <div class="stat-box">
-        <div class="stat-num" id="stat-correct">—</div>
-        <div class="stat-label" data-i18n="stat_correct">Correct</div>
-      </div>
-      <div class="stat-box">
-        <div class="stat-num" id="stat-percentage">—</div>
-        <div class="stat-label" data-i18n="stat_percentage">Win %</div>
-      </div>
+      <div id="my-predictions-list"></div>
     </div>
-    <div id="my-predictions-by-league"></div>
-    <div id="my-predictions-list"></div>
   </div>
 
   <!-- ── LEADERBOARD ── -->
   <div id="tab-leaderboard" style="display:none;">
-    <div class="section-title" data-i18n="global_leaderboard">Global Leaderboard</div>
-    <div class="toggle-bar" style="margin-bottom:16px;">
-      <button class="toggle-btn active" data-lb-sort="wins" data-i18n="sort_by_wins">By wins</button>
-      <button class="toggle-btn" data-lb-sort="percentage" data-i18n="sort_by_percentage">By %</button>
+    <div id="leaderboard-competition-picker"></div>
+    <div id="leaderboard-view" style="display:none;">
+      <button class="btn-ghost btn-sm" id="btn-back-to-competitions-leaderboard" style="margin-bottom:14px;">← <span data-i18n="back_to_competitions">Back to competitions</span></button>
+      <div class="section-title" data-i18n="global_leaderboard">Global Leaderboard</div>
+      <div class="toggle-bar" style="margin-bottom:16px;">
+        <button class="toggle-btn active" data-lb-sort="wins" data-i18n="sort_by_wins">By wins</button>
+        <button class="toggle-btn" data-lb-sort="percentage" data-i18n="sort_by_percentage">By %</button>
+      </div>
+      <div class="leaderboard-card" id="leaderboard-list"></div>
     </div>
-    <div class="leaderboard-card" id="leaderboard-list"></div>
   </div>
 
   <!-- ── GROUPS ── -->
@@ -983,7 +990,6 @@ const strings = {
     link_sent_sub: "We sent a magic link. Click it to log in. Valid for 15 minutes.",
     upcoming: "Upcoming", played: "Played",
     back_to_competitions: "Back to competitions", choose_competition: "Choose a competition",
-    by_competition: "By competition",
     home_win: "Home", draw: "Draw", away_win: "Away",
     stat_predicted: "Predicted", stat_correct: "Correct", stat_percentage: "Win %",
     sort_by_wins: "By wins", sort_by_percentage: "By %",
@@ -1045,7 +1051,6 @@ const strings = {
     link_sent_sub: "Abbiamo inviato un link magico. Cliccalo per accedere. Valido 15 minuti.",
     upcoming: "Da giocare", played: "Giocate",
     back_to_competitions: "Torna alle competizioni", choose_competition: "Scegli una competizione",
-    by_competition: "Per competizione",
     home_win: "Casa", draw: "Pareggio", away_win: "Ospite",
     stat_predicted: "Pronostici", stat_correct: "Corretti", stat_percentage: "% Vittorie",
     sort_by_wins: "Per vittorie", sort_by_percentage: "Per %",
@@ -1348,15 +1353,16 @@ function matchCompetition(matchId) {
 // schermata di scelta.
 let selectedMatchCompetition = null;
 
-async function renderCompetitionPicker() {
-  const picker = document.getElementById("competition-picker");
-  document.getElementById("matches-view").style.display = "none";
+async function renderCompetitionPicker(containerId, onSelect) {
+  const picker = document.getElementById(containerId);
   picker.style.display = "block";
   picker.innerHTML = `<div class="status">${t("loading")}</div>`;
 
   try {
-    const dataRes = await api("GET", "/matches-data", null, false);
-    matchesData = dataRes.data || { matches: [] };
+    if (!matchesData.matches || matchesData.matches.length === 0) {
+      const dataRes = await api("GET", "/matches-data", null, false);
+      matchesData = dataRes.data || { matches: [] };
+    }
 
     // Il Mondiale non compare più tra le scelte: si è concluso, non serve
     // più mostrarlo qui (resta comunque nello storico "I miei pronostici").
@@ -1387,7 +1393,7 @@ async function renderCompetitionPicker() {
     `;
 
     picker.querySelectorAll(".competition-card").forEach(card => {
-      card.addEventListener("click", () => showMatchesForCompetition(card.dataset.competition));
+      card.addEventListener("click", () => onSelect(card.dataset.competition));
     });
   } catch (err) {
     picker.innerHTML = `<div class="status error">${err.message}</div>`;
@@ -1406,7 +1412,34 @@ async function showMatchesForCompetition(code, filter = "upcoming") {
 
 document.getElementById("btn-back-to-competitions").addEventListener("click", () => {
   selectedMatchCompetition = null;
-  renderCompetitionPicker();
+  document.getElementById("matches-view").style.display = "none";
+  renderCompetitionPicker("competition-picker", showMatchesForCompetition);
+});
+
+async function showPredictionsForCompetition(code) {
+  selectedMatchCompetition = code;
+  document.getElementById("predictions-competition-picker").style.display = "none";
+  document.getElementById("predictions-view").style.display = "block";
+  await renderMyPredictions();
+}
+
+document.getElementById("btn-back-to-competitions-predictions").addEventListener("click", () => {
+  selectedMatchCompetition = null;
+  document.getElementById("predictions-view").style.display = "none";
+  renderCompetitionPicker("predictions-competition-picker", showPredictionsForCompetition);
+});
+
+async function showLeaderboardForCompetition(code) {
+  selectedMatchCompetition = code;
+  document.getElementById("leaderboard-competition-picker").style.display = "none";
+  document.getElementById("leaderboard-view").style.display = "block";
+  await renderLeaderboard(null, "leaderboard-list", currentUser?.address, currentLeaderboardSort);
+}
+
+document.getElementById("btn-back-to-competitions-leaderboard").addEventListener("click", () => {
+  selectedMatchCompetition = null;
+  document.getElementById("leaderboard-view").style.display = "none";
+  renderCompetitionPicker("leaderboard-competition-picker", showLeaderboardForCompetition);
 });
 
 async function renderMatches(filter = "upcoming") {
@@ -1622,79 +1655,57 @@ async function renderMyPredictions() {
   }
 
   await initEthers();
-  const nextId = await readContract.nextMatchId();
-  const total = Number(nextId);
-
-  let predicted = 0, correct = 0, resolvedCount = 0;
   const container = document.getElementById("my-predictions-list");
   container.innerHTML = `<div class="status">${t("loading")}</div>`;
 
-  const byLeague = {}; // { WC: {predicted, correct, resolvedCount}, SA: {...}, ... }
+  // Solo i matchId della lega selezionata — non più tutte le partite di tutte
+  // le competizioni: più chiaro da leggere (il totale non include più partite
+  // di altre leghe) e molto più veloce da caricare.
+  const idsToCheck = matchesData.matches
+    .filter(m => (m.competition || "WC") === selectedMatchCompetition)
+    .map(m => m.contractMatchId);
 
-  const items = [];
-  for (let i = 0; i < total; i++) {
+  const rawItems = await mapWithConcurrencyLimit(idsToCheck, 6, async (i) => {
     const pred = Number(await readContract.predictions(i, currentUser.address));
-    if (pred === 0) continue;
-    predicted++;
-    const raw = await readContract.getMatch(i);
+    if (pred === 0) return null;
+    const [raw, claimed] = await Promise.all([
+      readContract.getMatch(i),
+      readContract.claimed(i, currentUser.address)
+    ]);
     const m = { id: i, teamHome: raw.teamHome, teamAway: raw.teamAway,
       predictionDeadline: raw.predictionDeadline, resolved: raw.resolved,
       actualResult: raw.actualResult, exists: raw.exists };
+    return { id: i, m, pred, claimed };
+  });
 
-    const comp = matchCompetition(i);
-    if (!byLeague[comp]) byLeague[comp] = { predicted: 0, correct: 0, resolvedCount: 0 };
-    byLeague[comp].predicted++;
+  const items = rawItems.filter(Boolean);
 
+  let correct = 0, resolvedCount = 0;
+  items.forEach(({ m, pred }) => {
     if (m.resolved) {
       resolvedCount++;
-      byLeague[comp].resolvedCount++;
-      if (Number(m.actualResult) === pred) {
-        correct++;
-        byLeague[comp].correct++;
-      }
+      if (Number(m.actualResult) === pred) correct++;
     }
-    items.push({ id: i, m, pred });
-  }
+  });
 
-  document.getElementById("stat-predicted").textContent = predicted;
+  document.getElementById("stat-predicted").textContent = items.length;
   document.getElementById("stat-correct").textContent = correct;
   document.getElementById("stat-percentage").textContent =
     resolvedCount > 0 ? `${Math.round((correct / resolvedCount) * 100)}%` : "—";
 
-  // Riepilogo per lega — il Mondiale è escluso di proposito: esiste solo per
-  // la durata della testnet, non avrebbe senso continuare a mostrarlo come
-  // una "lega" separata una volta passati a mainnet.
-  const leagueContainer = document.getElementById("my-predictions-by-league");
-  const leagues = Object.keys(byLeague).filter(c => c !== "WC" && byLeague[c].predicted > 0);
-  if (leagues.length === 0) {
-    leagueContainer.innerHTML = "";
-  } else {
-    leagueContainer.innerHTML = `
-      <div class="section-title" style="margin-top:8px;">${t("by_competition")}</div>
-      <div class="stats-row" style="flex-wrap:wrap;">
-        ${leagues.map(comp => {
-          const s = byLeague[comp];
-          const pct = s.resolvedCount > 0 ? Math.round((s.correct / s.resolvedCount) * 100) : null;
-          return `
-            <div class="stat-box" style="min-width:120px;">
-              <div class="stat-num" style="font-size:20px;">${pct !== null ? pct + "%" : "—"}</div>
-              <div class="stat-label">${COMPETITION_NAMES[comp] || comp}</div>
-              <div class="stat-label" style="opacity:0.7;">${s.correct}/${s.resolvedCount} · ${s.predicted} ${t("predictions_made")}</div>
-            </div>`;
-        }).join("")}
-      </div>`;
-  }
-
   if (items.length === 0) {
     container.innerHTML = `<div class="status">${t("no_matches")}</div>`;
-  } else {
-    container.innerHTML = "";
-    for (const { id, m, pred } of items) {
-      const extra = matchesData.matches.find(x => x.contractMatchId === id) || {};
-      const card = buildMatchCard(m, extra, pred, await readContract.claimed(id, currentUser.address));
-      container.appendChild(card);
-    }
+    return;
   }
+
+  items.sort((a, b) => Number(b.m.predictionDeadline) - Number(a.m.predictionDeadline));
+
+  container.innerHTML = "";
+  items.forEach(({ id, m, pred, claimed }) => {
+    const extra = matchesData.matches.find(x => x.contractMatchId === id) || {};
+    const card = buildMatchCard(m, extra, pred, claimed);
+    container.appendChild(card);
+  });
 }
 
 // ============================================================
@@ -1709,14 +1720,25 @@ async function renderLeaderboard(addresses, containerId, userAddr, sortMode = "w
   const container = document.getElementById(containerId);
   container.innerHTML = `<div class="status">${t("loading")}</div>`;
 
-  const nextId = await readContract.nextMatchId();
-  const total = Number(nextId);
+  if (!matchesData.matches || matchesData.matches.length === 0) {
+    try {
+      const dataRes = await api("GET", "/matches-data", null, false);
+      matchesData = dataRes.data || { matches: [] };
+    } catch {}
+  }
+
+  // Solo i matchId della lega selezionata, letti in parallelo (limitato) —
+  // non più tutte le partite di tutte le competizioni una alla volta.
+  const idsToCheck = matchesData.matches
+    .filter(m => (m.competition || "WC") === selectedMatchCompetition)
+    .map(m => m.contractMatchId);
+
   const wins = new Map();
   const totalPredictions = new Map();
 
-  for (let i = 0; i < total; i++) {
+  await mapWithConcurrencyLimit(idsToCheck, 6, async (i) => {
     const m = await readContract.getMatch(i);
-    if (!m.resolved) continue;
+    if (!m.resolved) return;
     const actual = Number(m.actualResult);
     const events = await fetchPredictionEvents(i);
     events.forEach(e => {
@@ -1725,7 +1747,7 @@ async function renderLeaderboard(addresses, containerId, userAddr, sortMode = "w
       totalPredictions.set(addr, (totalPredictions.get(addr) || 0) + 1);
       if (e.result === actual) wins.set(addr, (wins.get(addr) || 0) + 1);
     });
-  }
+  });
 
   let entries = [...totalPredictions.keys()].map(addr => {
     const w = wins.get(addr) || 0;
@@ -2086,11 +2108,25 @@ function showTab(tabName) {
         document.querySelector("#tab-matches .toggle-btn[data-match-filter].active")?.dataset?.matchFilter || "upcoming"
       );
     } else {
-      renderCompetitionPicker();
+      renderCompetitionPicker("competition-picker", showMatchesForCompetition);
     }
   }
-  if (tabName === "my-predictions") renderMyPredictions();
-  if (tabName === "leaderboard") renderLeaderboard(null, "leaderboard-list", currentUser?.address, currentLeaderboardSort);
+  if (tabName === "my-predictions") {
+    if (selectedMatchCompetition) {
+      showPredictionsForCompetition(selectedMatchCompetition);
+    } else {
+      document.getElementById("predictions-view").style.display = "none";
+      renderCompetitionPicker("predictions-competition-picker", showPredictionsForCompetition);
+    }
+  }
+  if (tabName === "leaderboard") {
+    if (selectedMatchCompetition) {
+      showLeaderboardForCompetition(selectedMatchCompetition);
+    } else {
+      document.getElementById("leaderboard-view").style.display = "none";
+      renderCompetitionPicker("leaderboard-competition-picker", showLeaderboardForCompetition);
+    }
+  }
   if (tabName === "groups") {
     document.getElementById("group-detail").style.display = "none";
     document.getElementById("groups-list").style.display = "block";
