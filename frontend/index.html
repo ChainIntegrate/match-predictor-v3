@@ -361,6 +361,23 @@
   .toggle-btn.active { background: var(--card); color: var(--chalk); }
 
   /* ── Leaderboard ── */
+  .competition-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px;
+    margin-bottom: 10px;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .competition-card:hover { border-color: var(--green-dim); background: var(--bg-mid); }
+  .competition-card .name { font-weight: 700; font-size: 16px; }
+  .competition-card .count { color: var(--chalk-dim); font-size: 13px; }
+
   .leaderboard-row {
     display: flex;
     align-items: center;
@@ -742,12 +759,15 @@
 
   <!-- ── MATCHES ── -->
   <div id="tab-matches" style="display:none;">
-    <div id="competition-filter" class="toggle-bar" style="margin-bottom:14px; flex-wrap:wrap;"></div>
-    <div class="toggle-bar">
-      <button class="toggle-btn active" data-match-filter="upcoming" data-i18n="upcoming">Upcoming</button>
-      <button class="toggle-btn" data-match-filter="played" data-i18n="played">Played</button>
+    <div id="competition-picker"></div>
+    <div id="matches-view" style="display:none;">
+      <button class="btn-ghost btn-sm" id="btn-back-to-competitions" style="margin-bottom:14px;">← <span data-i18n="back_to_competitions">Back to competitions</span></button>
+      <div class="toggle-bar">
+        <button class="toggle-btn active" data-match-filter="upcoming" data-i18n="upcoming">Upcoming</button>
+        <button class="toggle-btn" data-match-filter="played" data-i18n="played">Played</button>
+      </div>
+      <div id="matches-list"></div>
     </div>
-    <div id="matches-list"></div>
   </div>
 
   <!-- ── MY PREDICTIONS ── -->
@@ -961,7 +981,8 @@ const strings = {
     send_link: "Send magic link",
     link_sent_title: "Check your email!",
     link_sent_sub: "We sent a magic link. Click it to log in. Valid for 15 minutes.",
-    upcoming: "Upcoming", played: "Played", all_competitions: "All competitions",
+    upcoming: "Upcoming", played: "Played",
+    back_to_competitions: "Back to competitions", choose_competition: "Choose a competition",
     by_competition: "By competition",
     home_win: "Home", draw: "Draw", away_win: "Away",
     stat_predicted: "Predicted", stat_correct: "Correct", stat_percentage: "Win %",
@@ -1022,7 +1043,8 @@ const strings = {
     register_btn: "Crea account",
     link_sent_title: "Controlla la tua email!",
     link_sent_sub: "Abbiamo inviato un link magico. Cliccalo per accedere. Valido 15 minuti.",
-    upcoming: "Da giocare", played: "Giocate", all_competitions: "Tutte le competizioni",
+    upcoming: "Da giocare", played: "Giocate",
+    back_to_competitions: "Torna alle competizioni", choose_competition: "Scegli una competizione",
     by_competition: "Per competizione",
     home_win: "Casa", draw: "Pareggio", away_win: "Ospite",
     stat_predicted: "Pronostici", stat_correct: "Corretti", stat_percentage: "% Vittorie",
@@ -1320,51 +1342,90 @@ function matchCompetition(matchId) {
   return extra?.competition || "WC";
 }
 
-function populateCompetitionFilter() {
-  const container = document.getElementById("competition-filter");
-  const previousValue = container.dataset.selected || "all";
+// Competizione attualmente scelta nel tab Partite — null finché non se ne
+// sceglie una dalla schermata di selezione. Persiste tra un pronostico e
+// l'altro, così dopo aver pronosticato si torna alla stessa lega, non alla
+// schermata di scelta.
+let selectedMatchCompetition = null;
 
-  const present = [...new Set(matchesData.matches.map(m => m.competition || "WC"))];
-  // Mondiale sempre in fondo se presente: è testnet-only, destinato a sparire in mainnet
-  present.sort((a, b) => {
-    if (a === "WC") return 1;
-    if (b === "WC") return -1;
-    return (COMPETITION_NAMES[a] || a).localeCompare(COMPETITION_NAMES[b] || b);
-  });
+async function renderCompetitionPicker() {
+  const picker = document.getElementById("competition-picker");
+  document.getElementById("matches-view").style.display = "none";
+  picker.style.display = "block";
+  picker.innerHTML = `<div class="status">${t("loading")}</div>`;
 
-  const selected = (previousValue === "all" || present.includes(previousValue)) ? previousValue : "all";
-  container.dataset.selected = selected;
+  try {
+    const dataRes = await api("GET", "/matches-data", null, false);
+    matchesData = dataRes.data || { matches: [] };
 
-  const buttons = [`<button class="toggle-btn${selected === "all" ? " active" : ""}" data-competition="all">${t("all_competitions")}</button>`]
-    .concat(present.map(code =>
-      `<button class="toggle-btn${selected === code ? " active" : ""}" data-competition="${code}">${COMPETITION_NAMES[code] || code}</button>`
-    ));
+    // Il Mondiale non compare più tra le scelte: si è concluso, non serve
+    // più mostrarlo qui (resta comunque nello storico "I miei pronostici").
+    const counts = {};
+    matchesData.matches.forEach(m => {
+      const comp = m.competition || "WC";
+      if (comp === "WC") return;
+      counts[comp] = (counts[comp] || 0) + 1;
+    });
 
-  container.innerHTML = buttons.join("");
+    const codes = Object.keys(counts).sort((a, b) =>
+      (COMPETITION_NAMES[a] || a).localeCompare(COMPETITION_NAMES[b] || b)
+    );
+
+    if (codes.length === 0) {
+      picker.innerHTML = `<div class="status">${t("no_matches")}</div>`;
+      return;
+    }
+
+    picker.innerHTML = `
+      <div class="section-title">${t("choose_competition")}</div>
+      ${codes.map(code => `
+        <div class="competition-card" data-competition="${code}">
+          <span class="name">${COMPETITION_NAMES[code] || code}</span>
+          <span class="count">${counts[code]} ${t("predictions_made")}</span>
+        </div>
+      `).join("")}
+    `;
+
+    picker.querySelectorAll(".competition-card").forEach(card => {
+      card.addEventListener("click", () => showMatchesForCompetition(card.dataset.competition));
+    });
+  } catch (err) {
+    picker.innerHTML = `<div class="status error">${err.message}</div>`;
+  }
 }
+
+async function showMatchesForCompetition(code, filter = "upcoming") {
+  selectedMatchCompetition = code;
+  document.getElementById("competition-picker").style.display = "none";
+  document.getElementById("matches-view").style.display = "block";
+  document.querySelectorAll("#matches-view .toggle-btn[data-match-filter]").forEach(b =>
+    b.classList.toggle("active", b.dataset.matchFilter === filter)
+  );
+  await renderMatches(filter);
+}
+
+document.getElementById("btn-back-to-competitions").addEventListener("click", () => {
+  selectedMatchCompetition = null;
+  renderCompetitionPicker();
+});
 
 async function renderMatches(filter = "upcoming") {
   const container = document.getElementById("matches-list");
   container.innerHTML = `<div class="status">${t("loading")}</div>`;
 
   try {
-    // Carica matches-data dal backend (per footballDataMatchId e label)
-    const dataRes = await api("GET", "/matches-data", null, false);
-    matchesData = dataRes.data || { matches: [] };
-    populateCompetitionFilter();
-    const selectedCompetition = document.getElementById("competition-filter").dataset.selected || "all";
+    if (!matchesData.matches || matchesData.matches.length === 0) {
+      const dataRes = await api("GET", "/matches-data", null, false);
+      matchesData = dataRes.data || { matches: [] };
+    }
 
-    // Se è selezionata una competizione specifica, limitiamo la lettura dalla
-    // chain solo ai suoi matchId — invece di leggere sempre tutte le partite
-    // di ogni competizione e filtrare dopo, il che diventa lento man mano che
-    // se ne aggiungono altre.
-    const idsToFetch = selectedCompetition === "all"
-      ? null
-      : matchesData.matches
-          .filter(m => (m.competition || "WC") === selectedCompetition)
-          .map(m => m.contractMatchId);
+    // Leggiamo dalla chain solo i matchId della competizione scelta — mai più
+    // "tutte le partite di tutte le leghe insieme", che è quello che rendeva
+    // lento il caricamento con più campionati attivi.
+    const idsToFetch = matchesData.matches
+      .filter(m => (m.competition || "WC") === selectedMatchCompetition)
+      .map(m => m.contractMatchId);
 
-    // Carica stato on-chain
     onChainMatches = await loadMatchesFromChain(idsToFetch);
 
     const now = Date.now();
@@ -1372,7 +1433,6 @@ async function renderMatches(filter = "upcoming") {
       const deadline = Number(m.predictionDeadline) * 1000;
       if (filter === "upcoming" && (m.resolved || now >= deadline)) return false;
       if (filter === "played" && !(m.resolved || now >= deadline)) return false;
-      if (selectedCompetition !== "all" && matchCompetition(m.id) !== selectedCompetition) return false;
       return true;
     });
 
@@ -2019,7 +2079,16 @@ function showTab(tabName) {
     btn.classList.toggle("active", btn.dataset.tab === tabName);
   });
 
-  if (tabName === "matches") renderMatches(document.querySelector("#tab-matches .toggle-btn[data-match-filter].active")?.dataset?.matchFilter || "upcoming");
+  if (tabName === "matches") {
+    if (selectedMatchCompetition) {
+      showMatchesForCompetition(
+        selectedMatchCompetition,
+        document.querySelector("#tab-matches .toggle-btn[data-match-filter].active")?.dataset?.matchFilter || "upcoming"
+      );
+    } else {
+      renderCompetitionPicker();
+    }
+  }
   if (tabName === "my-predictions") renderMyPredictions();
   if (tabName === "leaderboard") renderLeaderboard(null, "leaderboard-list", currentUser?.address, currentLeaderboardSort);
   if (tabName === "groups") {
@@ -2105,6 +2174,7 @@ function updateFloatingConfirm() {
     btn.style.display = "none";
   } else {
     btn.style.display = "block";
+    btn.disabled = false;
     const lang_it = navigator.language?.startsWith("it");
     document.getElementById("floating-confirm-count").textContent = count;
     btn.childNodes[0].textContent = lang_it
@@ -2343,17 +2413,6 @@ document.querySelectorAll(".toggle-btn").forEach(btn => {
     btn.classList.add("active");
     renderMatches(btn.dataset.matchFilter);
   });
-});
-
-document.getElementById("competition-filter").addEventListener("click", (e) => {
-  const btn = e.target.closest(".toggle-btn");
-  if (!btn) return;
-  const container = document.getElementById("competition-filter");
-  container.dataset.selected = btn.dataset.competition;
-  container.querySelectorAll(".toggle-btn").forEach(b => b.classList.remove("active"));
-  btn.classList.add("active");
-  const activeFilter = document.querySelector("#tab-matches .toggle-btn[data-match-filter].active")?.dataset?.matchFilter || "upcoming";
-  renderMatches(activeFilter);
 });
 
 // Groups: join
