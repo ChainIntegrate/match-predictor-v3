@@ -990,6 +990,12 @@ const strings = {
     link_sent_sub: "We sent a magic link. Click it to log in. Valid for 15 minutes.",
     upcoming: "Upcoming", played: "Played",
     back_to_competitions: "Back to competitions", choose_competition: "Choose a competition",
+    joined: "Joined", not_joined: "Not joined yet",
+    competitions_joined_label: "competitions joined", request_more: "Request more",
+    more_competitions_reason: "an additional competition slot",
+    more_groups_reason: "an additional group slot",
+    competition_limit_reached: "You've reached your limit of competitions you can join at the same time.",
+    confirm_join_competition: "Join {name}? This uses one of your competition slots. Continue?",
     home_win: "Home", draw: "Draw", away_win: "Away",
     stat_predicted: "Predicted", stat_correct: "Correct", stat_percentage: "Win %",
     sort_by_wins: "By wins", sort_by_percentage: "By %",
@@ -1051,6 +1057,12 @@ const strings = {
     link_sent_sub: "Abbiamo inviato un link magico. Cliccalo per accedere. Valido 15 minuti.",
     upcoming: "Da giocare", played: "Giocate",
     back_to_competitions: "Torna alle competizioni", choose_competition: "Scegli una competizione",
+    joined: "Iscritto", not_joined: "Non ancora iscritto",
+    competitions_joined_label: "competizioni a cui sei iscritto", request_more: "Richiedi di più",
+    more_competitions_reason: "uno slot competizione in più",
+    more_groups_reason: "uno slot gruppo in più",
+    competition_limit_reached: "Hai raggiunto il numero massimo di competizioni a cui puoi partecipare contemporaneamente.",
+    confirm_join_competition: "Iscriverti a {name}? Userai uno dei tuoi slot competizione. Continuare?",
     home_win: "Casa", draw: "Pareggio", away_win: "Ospite",
     stat_predicted: "Pronostici", stat_correct: "Corretti", stat_percentage: "% Vittorie",
     sort_by_wins: "Per vittorie", sort_by_percentage: "Per %",
@@ -1353,6 +1365,23 @@ function matchCompetition(matchId) {
 // schermata di scelta.
 let selectedMatchCompetition = null;
 
+function requestExtensionLinks(reason) {
+  const subject = "Richiesta estensione limiti MatchPredictor";
+  const body = `Ciao,\n\nVorrei chiedere un aumento del limite per: ${reason}.\n\nGrazie!`;
+  return {
+    mailto: `mailto:info@chainintegrate.it?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`,
+    gmail: `https://mail.google.com/mail/?view=cm&fs=1&to=info@chainintegrate.it&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+  };
+}
+
+// HTML pronto con entrambe le opzioni — non c'è modo affidabile di sapere se
+// chi clicca ha un client di posta configurato, quindi offriamo entrambe le
+// strade invece di scommettere su una sola.
+function requestExtensionHtml(reason, color = "green") {
+  const { mailto, gmail } = requestExtensionLinks(reason);
+  return `<a href="${mailto}" style="color:var(--${color});">${t("request_more")}</a> (<a href="${gmail}" target="_blank" rel="noopener" style="color:var(--${color});">Gmail</a>)`;
+}
+
 async function renderCompetitionPicker(containerId, onSelect) {
   const picker = document.getElementById(containerId);
   picker.style.display = "block";
@@ -1382,18 +1411,60 @@ async function renderCompetitionPicker(containerId, onSelect) {
       return;
     }
 
+    // Se loggato, sappiamo già a quali competizioni si è iscritti — serve per
+    // decidere se un click "entra e basta" o richiede prima l'iscrizione.
+    let joinedCompetitions = [];
+    let maxCompetitions = 2;
+    if (isLoggedIn()) {
+      try {
+        const compRes = await api("GET", "/user/competitions");
+        if (compRes.success) {
+          joinedCompetitions = compRes.competitions;
+          maxCompetitions = compRes.max;
+        }
+      } catch {}
+    }
+
     picker.innerHTML = `
       <div class="section-title">${t("choose_competition")}</div>
-      ${codes.map(code => `
+      <div id="picker-limit-message" class="status error" style="display:none; margin-bottom:12px;"></div>
+      ${codes.map(code => {
+        const joined = joinedCompetitions.includes(code);
+        return `
         <div class="competition-card" data-competition="${code}">
           <span class="name">${COMPETITION_NAMES[code] || code}</span>
-          <span class="count">${counts[code]} ${t("predictions_made")}</span>
-        </div>
-      `).join("")}
+          <span class="count">
+            ${counts[code]} ${t("predictions_made")}
+            ${isLoggedIn() ? (joined ? ` · <span style="color:var(--green);">✓ ${t("joined")}</span>` : ` · <span style="color:var(--chalk-dim);">${t("not_joined")}</span>`) : ""}
+          </span>
+        </div>`;
+      }).join("")}
+      ${isLoggedIn() ? `<div class="match-meta" style="margin-top:8px;">${joinedCompetitions.length}/${maxCompetitions} ${t("competitions_joined_label")} · ${requestExtensionHtml(t("more_competitions_reason"))}</div>` : ""}
     `;
 
     picker.querySelectorAll(".competition-card").forEach(card => {
-      card.addEventListener("click", () => onSelect(card.dataset.competition));
+      card.addEventListener("click", async () => {
+        const code = card.dataset.competition;
+        if (!isLoggedIn() || joinedCompetitions.includes(code)) {
+          onSelect(code);
+          return;
+        }
+        // Non ancora iscritto: serve iscriversi prima di entrare
+        if (joinedCompetitions.length >= maxCompetitions) {
+          const msg = document.getElementById("picker-limit-message");
+          msg.innerHTML = `${t("competition_limit_reached")} ${requestExtensionHtml(t("more_competitions_reason"), "red")}`;
+          msg.style.display = "block";
+          msg.scrollIntoView({ behavior: "smooth", block: "nearest" });
+          return;
+        }
+        if (!confirm(t("confirm_join_competition").replace("{name}", COMPETITION_NAMES[code] || code))) return;
+        const res = await api("POST", "/user/join-competition", { competition: code });
+        if (res.success) {
+          onSelect(code);
+        } else {
+          alert(res.error || "Error");
+        }
+      });
     });
   } catch (err) {
     picker.innerHTML = `<div class="status error">${err.message}</div>`;
@@ -2084,8 +2155,12 @@ async function joinGroup(code) {
     statusEl.style.color = "var(--green)";
     await renderGroups();
   } else {
-    statusEl.textContent = res.error;
     statusEl.style.color = "var(--red)";
+    if (res.error?.includes("massimo")) {
+      statusEl.innerHTML = `${res.error}<br>${requestExtensionHtml(t("more_groups_reason"), "red")}`;
+    } else {
+      statusEl.textContent = res.error;
+    }
   }
 }
 
@@ -2523,8 +2598,12 @@ document.getElementById("btn-create-group").addEventListener("click", async () =
     document.getElementById("group-desc").value = "";
     await renderGroups();
   } else {
-    statusEl.textContent = res.error;
     statusEl.style.color = "var(--red)";
+    if (res.error?.includes("massimo")) {
+      statusEl.innerHTML = `${res.error}<br>${requestExtensionHtml(t("more_groups_reason"), "red")}`;
+    } else {
+      statusEl.textContent = res.error;
+    }
   }
 });
 

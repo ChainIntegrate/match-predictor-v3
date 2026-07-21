@@ -17,6 +17,11 @@ db.exec(`
     display_name          TEXT,
     terms_accepted        INTEGER NOT NULL DEFAULT 0,
     marketing_consent     INTEGER NOT NULL DEFAULT 0,
+    -- Override personalizzati ai limiti globali (NULL = usa il default per tutti).
+    -- Si impostano a mano via SQL quando un utente chiede un'estensione.
+    max_groups_created     INTEGER,
+    max_groups_joined      INTEGER,
+    max_competitions_joined INTEGER,
     created_at            INTEGER NOT NULL DEFAULT (unixepoch())
   );
 
@@ -84,12 +89,23 @@ db.exec(`
     UNIQUE(group_id, contract_match_id)
   );
 
+  -- Iscrizione esplicita di un utente a una competizione (lega/campionato).
+  -- Serve un pronostico prima è richiesto un join esplicito, come per i gruppi.
+  CREATE TABLE IF NOT EXISTS user_competitions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    competition TEXT    NOT NULL,
+    joined_at   INTEGER NOT NULL DEFAULT (unixepoch()),
+    UNIQUE(user_id, competition)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_magic_links_token        ON magic_links(token);
   CREATE INDEX IF NOT EXISTS idx_magic_links_email        ON magic_links(email);
   CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user      ON refresh_tokens(user_id);
   CREATE INDEX IF NOT EXISTS idx_transfer_requests_status ON transfer_requests(status);
   CREATE INDEX IF NOT EXISTS idx_group_members_user       ON group_members(user_id);
   CREATE INDEX IF NOT EXISTS idx_group_members_group      ON group_members(group_id);
+  CREATE INDEX IF NOT EXISTS idx_user_competitions_user    ON user_competitions(user_id);
 `);
 
 module.exports = db;

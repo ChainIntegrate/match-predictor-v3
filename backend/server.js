@@ -35,6 +35,24 @@ function writeMatchesData(data) {
   fs.writeFileSync(MATCHES_DATA_PATH, JSON.stringify(data, null, 2), "utf8");
 }
 
+// Risale alla competizione di un matchId dalla cache (default "WC" per le
+// partite storiche del Mondiale, create prima che il campo esistesse).
+function matchCompetitionFromCache(contractMatchId) {
+  const data = readMatchesData();
+  const entry = (data.matches || []).find(m => m.contractMatchId === contractMatchId);
+  return entry?.competition || "WC";
+}
+
+// Verifica che l'utente sia iscritto a quella competizione prima di
+// permettergli di pronosticare — enforcement lato server, non solo un
+// controllo estetico nel frontend.
+function requireCompetitionJoined(userId, contractMatchId) {
+  const competition = matchCompetitionFromCache(contractMatchId);
+  const joined = db.prepare("SELECT id FROM user_competitions WHERE user_id = ? AND competition = ?")
+    .get(userId, competition);
+  return !!joined;
+}
+
 // Verifica firma owner (ERC-1271) per endpoint admin sensibili
 async function verifyOwnerSignature(message, signature) {
   const provider = new ethers.JsonRpcProvider(process.env.LUKSO_RPC_URL, 4201, { batchMaxCount: 1, staticNetwork: true });
@@ -230,6 +248,9 @@ app.post("/api/predict", requireAuth, async (req, res) => {
   if (![1, 2, 3].includes(Number(predictedResult))) {
     return res.status(400).json({ success: false, error: "predictedResult deve essere 1 (Home), 2 (Draw) o 3 (Away)" });
   }
+  if (!requireCompetitionJoined(req.user.userId, Number(matchId))) {
+    return res.status(403).json({ success: false, error: "Devi prima iscriverti a questa competizione per pronosticare", code: "COMPETITION_NOT_JOINED" });
+  }
 
   try {
     const result = await predictFor(Number(matchId), Number(predictedResult), req.user.address);
@@ -254,6 +275,11 @@ app.post("/api/predict/batch", requireAuth, async (req, res) => {
 
   const matchIds = predictions.map(p => Number(p.matchId));
   const results = predictions.map(p => Number(p.predictedResult));
+
+  const notJoined = matchIds.find(id => !requireCompetitionJoined(req.user.userId, id));
+  if (notJoined !== undefined) {
+    return res.status(403).json({ success: false, error: "Devi prima iscriverti a questa competizione per pronosticare", code: "COMPETITION_NOT_JOINED" });
+  }
 
   try {
     const result = await predictBatchFor(matchIds, results, req.user.address);
@@ -551,6 +577,44 @@ app.get("/api/users/display-names", (req, res) => {
   res.json({ success: true, data: map });
 });
 
+// Limite effettivo per un utente: usa l'override personale se impostato
+// (colonna non NULL in users), altrimenti il default globale. Gli override
+// si impostano a mano via SQL quando qualcuno chiede un'estensione.
+function effectiveLimit(userId, column, globalDefault) {
+  const row = db.prepare(`SELECT ${column} as val FROM users WHERE id = ?`).get(userId);
+  return (row?.val ?? null) !== null ? row.val : globalDefault;
+}
+
+// ── Competizioni: iscrizione esplicita richiesta prima di pronosticare ────
+const MAX_COMPETITIONS_JOINED = 2;
+
+// GET /api/user/competitions — elenco competizioni a cui l'utente è iscritto
+app.get("/api/user/competitions", requireAuth, (req, res) => {
+  const rows = db.prepare("SELECT competition FROM user_competitions WHERE user_id = ?").all(req.user.userId);
+  const max = effectiveLimit(req.user.userId, "max_competitions_joined", MAX_COMPETITIONS_JOINED);
+  res.json({ success: true, competitions: rows.map(r => r.competition), max });
+});
+
+// POST /api/user/join-competition  { competition }
+app.post("/api/user/join-competition", requireAuth, (req, res) => {
+  const { competition } = req.body;
+  if (!competition?.trim()) return res.status(400).json({ success: false, error: "Competizione richiesta" });
+  const code = competition.trim().toUpperCase();
+
+  const already = db.prepare("SELECT id FROM user_competitions WHERE user_id = ? AND competition = ?")
+    .get(req.user.userId, code);
+  if (already) return res.json({ success: true, alreadyJoined: true });
+
+  const joined = db.prepare("SELECT COUNT(*) as count FROM user_competitions WHERE user_id = ?").get(req.user.userId);
+  const max = effectiveLimit(req.user.userId, "max_competitions_joined", MAX_COMPETITIONS_JOINED);
+  if (joined.count >= max) {
+    return res.status(403).json({ success: false, error: `Puoi partecipare a massimo ${max} competizioni contemporaneamente` });
+  }
+
+  db.prepare("INSERT INTO user_competitions (user_id, competition) VALUES (?, ?)").run(req.user.userId, code);
+  res.json({ success: true, alreadyJoined: false });
+});
+
 // ── Gruppi ────────────────────────────────────────────────────────────────
 
 const MAX_GROUPS_CREATED = 3;
@@ -568,8 +632,9 @@ app.post("/api/groups", requireAuth, (req, res) => {
 
   // Verifica limite gruppi creati (i gruppi congelati non contano più)
   const created = db.prepare("SELECT COUNT(*) as count FROM groups WHERE created_by = ? AND frozen_at IS NULL").get(req.user.userId);
-  if (created.count >= MAX_GROUPS_CREATED) {
-    return res.status(403).json({ success: false, error: `Puoi creare al massimo ${MAX_GROUPS_CREATED} gruppi` });
+  const maxCreated = effectiveLimit(req.user.userId, "max_groups_created", MAX_GROUPS_CREATED);
+  if (created.count >= maxCreated) {
+    return res.status(403).json({ success: false, error: `Puoi creare al massimo ${maxCreated} gruppi` });
   }
 
   // Verifica limite gruppi a cui partecipa (idem, i congelati non contano)
@@ -578,8 +643,9 @@ app.post("/api/groups", requireAuth, (req, res) => {
     JOIN groups g ON gm.group_id = g.id
     WHERE gm.user_id = ? AND g.frozen_at IS NULL
   `).get(req.user.userId);
-  if (joined.count >= MAX_GROUPS_JOINED) {
-    return res.status(403).json({ success: false, error: `Puoi partecipare a massimo ${MAX_GROUPS_JOINED} gruppi` });
+  const maxJoined = effectiveLimit(req.user.userId, "max_groups_joined", MAX_GROUPS_JOINED);
+  if (joined.count >= maxJoined) {
+    return res.status(403).json({ success: false, error: `Puoi partecipare a massimo ${maxJoined} gruppi` });
   }
 
   // Genera invite code univoco
@@ -654,8 +720,9 @@ app.post("/api/groups/:inviteCode/join", requireAuth, (req, res) => {
     JOIN groups g ON gm.group_id = g.id
     WHERE gm.user_id = ? AND g.frozen_at IS NULL
   `).get(req.user.userId);
-  if (joined.count >= MAX_GROUPS_JOINED) {
-    return res.status(403).json({ success: false, error: `Puoi partecipare a massimo ${MAX_GROUPS_JOINED} gruppi` });
+  const maxJoinedLimit = effectiveLimit(req.user.userId, "max_groups_joined", MAX_GROUPS_JOINED);
+  if (joined.count >= maxJoinedLimit) {
+    return res.status(403).json({ success: false, error: `Puoi partecipare a massimo ${maxJoinedLimit} gruppi` });
   }
 
   // Verifica limite membri del gruppo
