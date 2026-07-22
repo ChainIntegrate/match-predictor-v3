@@ -182,6 +182,7 @@ async function assignPrizes(contract, matchId, actualResult) {
 }
 
 async function main() {
+  console.log(`\n=== Giro avviato: ${new Date().toISOString()} ===`);
   const matchIdMapping = loadMatchIdMapping();
   console.log(`Mapping caricato da matches-data.json: ${Object.keys(matchIdMapping).length} partite conosciute.`);
 
@@ -253,13 +254,13 @@ async function main() {
     }
   }
 
-  console.log("Ciclo completato.");
+  console.log(`Ciclo completato: ${new Date().toISOString()}`);
 }
 
 if (acquireLock()) {
   main()
     .catch((error) => {
-      console.error("Errore generale:", error.message);
+      console.error(`Errore generale [${new Date().toISOString()}]:`, error.message);
       process.exitCode = 1;
     })
     .finally(() => {
