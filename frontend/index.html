@@ -1272,8 +1272,11 @@ async function initEthers() {
 }
 
 // Esegue le chiamate in parallelo ma a gruppi limitati, invece che tutte
-// insieme senza controllo — un proxy RPC condiviso come Blockscout regge
-// meglio 5-6 richieste alla volta che 50+ sparate nello stesso istante.
+// insieme senza controllo. Il piano gratuito di thirdweb dichiara 25
+// richieste/secondo, ma il limite osservato realmente sul progetto è 10/sec
+// — e conta le chiamate RPC raggruppate DENTRO una richiesta HTTP come
+// singole richieste separate, non una sola. 8 lascia un margine di sicurezza
+// anche con più utenti contemporaneamente.
 async function mapWithConcurrencyLimit(items, limit, fn) {
   const results = new Array(items.length);
   let cursor = 0;
@@ -1297,7 +1300,7 @@ async function loadMatchesFromChain(idsToFetch = null) {
     ids = Array.from({ length: Number(nextId) }, (_, i) => i);
   }
 
-  const results = await mapWithConcurrencyLimit(ids, 6, async (i) => {
+  const results = await mapWithConcurrencyLimit(ids, 8, async (i) => {
     try {
       const m = await readContract.getMatch(i);
       return { id: i, teamHome: m.teamHome, teamAway: m.teamAway, predictionDeadline: m.predictionDeadline, resolved: m.resolved, actualResult: m.actualResult, exists: m.exists };
@@ -1306,12 +1309,44 @@ async function loadMatchesFromChain(idsToFetch = null) {
   return results.filter(Boolean);
 }
 
+// Cache dei pronostici per partita: popolata da fetchAllPredictionEvents con
+// UNA sola chiamata per un intero gruppo di partite (invece che una per
+// partita, che con 28 partite significava 28 interrogazioni separate contro
+// il tetto di richieste al secondo di thirdweb).
+const predictionEventsCache = new Map(); // matchId -> events[]
+
+async function fetchAllPredictionEvents(matchIds) {
+  await initEthers();
+  const uncached = matchIds.filter(id => !predictionEventsCache.has(id));
+  if (uncached.length === 0) return;
+
+  try {
+    // Filtro con un ARRAY di matchId = "OR" tra questi valori lato nodo RPC,
+    // una singola vera interrogazione eth_getLogs invece di N separate.
+    const filter = readContract.filters.PredictionMade(uncached);
+    const events = await readContract.queryFilter(filter, 0, "latest");
+    uncached.forEach(id => predictionEventsCache.set(id, []));
+    events.forEach(e => {
+      const matchId = Number(e.args.matchId);
+      predictionEventsCache.get(matchId)?.push({ predictor: e.args.predictor, result: Number(e.args.predictedResult) });
+    });
+  } catch {
+    // In caso di errore, segnamo comunque come "vuoto per ora" per non
+    // ritentare a raffica nello stesso giro di rendering.
+    uncached.forEach(id => { if (!predictionEventsCache.has(id)) predictionEventsCache.set(id, []); });
+  }
+}
+
 async function fetchPredictionEvents(matchId) {
+  if (predictionEventsCache.has(matchId)) return predictionEventsCache.get(matchId);
+  // Fallback per chi chiama senza aver prima fatto il fetch collettivo
   await initEthers();
   try {
     const filter = readContract.filters.PredictionMade(matchId);
     const events = await readContract.queryFilter(filter, 0, "latest");
-    return events.map(e => ({ predictor: e.args.predictor, result: Number(e.args.predictedResult) }));
+    const result = events.map(e => ({ predictor: e.args.predictor, result: Number(e.args.predictedResult) }));
+    predictionEventsCache.set(matchId, result);
+    return result;
   } catch { return []; }
 }
 
@@ -1543,7 +1578,28 @@ async function renderMatches(filter = "upcoming") {
       .filter(m => (m.competition || "WC") === selectedMatchCompetition)
       .map(m => m.contractMatchId);
 
-    onChainMatches = await loadMatchesFromChain(idsToFetch);
+    await initEthers();
+    const userPreds = {};
+    const userClaims = {};
+
+    // Un unico passaggio per partita: dati partita + (se loggato) pronostico e
+    // stato riscatto insieme, invece di due fasi separate in sequenza — dimezza
+    // i "giri" di andata e ritorno necessari.
+    const rawMatches = await mapWithConcurrencyLimit(idsToFetch, 8, async (i) => {
+      try {
+        const raw = await readContract.getMatch(i);
+        if (isLoggedIn()) {
+          try {
+            userPreds[i] = Number(await readContract.predictions(i, currentUser.address));
+            userClaims[i] = await readContract.claimed(i, currentUser.address);
+          } catch {}
+        }
+        return { id: i, teamHome: raw.teamHome, teamAway: raw.teamAway,
+          predictionDeadline: raw.predictionDeadline, resolved: raw.resolved,
+          actualResult: raw.actualResult, exists: raw.exists };
+      } catch { return null; }
+    });
+    onChainMatches = rawMatches.filter(Boolean);
 
     const now = Date.now();
     let filtered = onChainMatches.filter(m => {
@@ -1558,18 +1614,10 @@ async function renderMatches(filter = "upcoming") {
       return;
     }
 
-    // Carica pronostici utente (se loggato)
-    const userPreds = {};
-    const userClaims = {};
-    if (isLoggedIn()) {
-      await initEthers();
-      for (const m of filtered) {
-        try {
-          userPreds[m.id] = Number(await readContract.predictions(m.id, currentUser.address));
-          userClaims[m.id] = await readContract.claimed(m.id, currentUser.address);
-        } catch {}
-      }
-    }
+    // Un'unica interrogazione per i pronostici di TUTTE le partite di questa
+    // pagina, invece di una per partita (28 partite = 28 richieste separate
+    // contro il tetto di 10/secondo di thirdweb).
+    await fetchAllPredictionEvents(filtered.map(m => m.id));
 
     container.innerHTML = "";
     for (const m of filtered) {
@@ -1749,7 +1797,7 @@ async function renderMyPredictions() {
     .filter(m => (m.competition || "WC") === selectedMatchCompetition)
     .map(m => m.contractMatchId);
 
-  const rawItems = await mapWithConcurrencyLimit(idsToCheck, 6, async (i) => {
+  const rawItems = await mapWithConcurrencyLimit(idsToCheck, 8, async (i) => {
     const pred = Number(await readContract.predictions(i, currentUser.address));
     if (pred === 0) return null;
     const [raw, claimed] = await Promise.all([
@@ -1783,6 +1831,8 @@ async function renderMyPredictions() {
   }
 
   items.sort((a, b) => Number(b.m.predictionDeadline) - Number(a.m.predictionDeadline));
+
+  await fetchAllPredictionEvents(items.map(x => x.id));
 
   container.innerHTML = "";
   items.forEach(({ id, m, pred, claimed }) => {
@@ -1820,7 +1870,12 @@ async function renderLeaderboard(addresses, containerId, userAddr, sortMode = "w
   const wins = new Map();
   const totalPredictions = new Map();
 
-  await mapWithConcurrencyLimit(idsToCheck, 6, async (i) => {
+  // Un'unica interrogazione per i pronostici di tutte le partite della lega —
+  // le chiamate a fetchPredictionEvents dentro il ciclo sotto diventano quindi
+  // letture dalla cache, non nuove richieste verso il nodo RPC.
+  await fetchAllPredictionEvents(idsToCheck);
+
+  await mapWithConcurrencyLimit(idsToCheck, 8, async (i) => {
     const m = await readContract.getMatch(i);
     if (!m.resolved) return;
     const actual = Number(m.actualResult);
@@ -1975,19 +2030,29 @@ async function computeGroupStandings(members, matchIds) {
   const winsMap = new Map();
   members.forEach(m => winsMap.set(m.address.toLowerCase(), 0));
 
-  for (const i of matchIds) {
+  // Prima leggiamo tutte le partite in parallelo, poi controlliamo i pronostici
+  // solo per quelle risolte — non più partita per partita in sequenza, e per
+  // ognuna tutti i membri uno alla volta (era un doppio ciclo annidato).
+  const matches = await mapWithConcurrencyLimit(matchIds, 8, async (i) => {
     try {
       const m = await readContract.getMatch(i);
-      if (!m.resolved) continue;
-      const actual = Number(m.actualResult);
-      for (const member of members) {
-        const pred = Number(await readContract.predictions(i, member.address));
-        if (pred === actual) {
-          winsMap.set(member.address.toLowerCase(), (winsMap.get(member.address.toLowerCase()) || 0) + 1);
-        }
+      return { id: i, m };
+    } catch { return null; }
+  });
+
+  const resolvedPairs = matches
+    .filter(x => x && x.m.resolved)
+    .flatMap(({ id, m }) => members.map(member => ({ id, actual: Number(m.actualResult), member })));
+
+  await mapWithConcurrencyLimit(resolvedPairs, 8, async ({ id, actual, member }) => {
+    try {
+      const pred = Number(await readContract.predictions(id, member.address));
+      if (pred === actual) {
+        const key = member.address.toLowerCase();
+        winsMap.set(key, (winsMap.get(key) || 0) + 1);
       }
     } catch {}
-  }
+  });
 
   return [...winsMap.entries()]
     .map(([address, wins]) => {
@@ -2070,16 +2135,16 @@ async function renderGroupMatches(members, filter) {
     matchIdsToShow = await liveGroupMatchIds(excludedIds);
   }
 
-  // Carica tutte le partite on-chain
-  const allMatches = [];
-  for (const i of matchIdsToShow) {
+  // Carica tutte le partite on-chain (in parallelo, non una alla volta)
+  const rawMatches = await mapWithConcurrencyLimit(matchIdsToShow, 8, async (i) => {
     try {
       const m = await readContract.getMatch(i);
-      allMatches.push({ id: i, teamHome: m.teamHome, teamAway: m.teamAway,
+      return { id: i, teamHome: m.teamHome, teamAway: m.teamAway,
         predictionDeadline: m.predictionDeadline, resolved: m.resolved,
-        actualResult: m.actualResult, exists: m.exists });
-    } catch {}
-  }
+        actualResult: m.actualResult, exists: m.exists };
+    } catch { return null; }
+  });
+  const allMatches = rawMatches.filter(Boolean);
 
   // Filtra
   const filtered = allMatches.filter(m => {
@@ -2094,25 +2159,29 @@ async function renderGroupMatches(members, filter) {
     return;
   }
 
-  // Carica i pronostici di tutti i membri per tutte le partite
+  await fetchAllPredictionEvents(filtered.map(m => m.id));
+
+  // Carica i pronostici di tutti i membri per tutte le partite — in parallelo
+  // a gruppi limitati. Prima era un doppio ciclo sequenziale (membri × partite):
+  // con 5 membri e 28 partite erano 140 chiamate una dietro l'altra.
   const memberPreds = {}; // address → { matchId → result }
-  for (const member of members) {
-    memberPreds[member.address.toLowerCase()] = {};
-    for (const m of filtered) {
-      try {
-        const pred = Number(await readContract.predictions(m.id, member.address));
-        memberPreds[member.address.toLowerCase()][m.id] = pred;
-      } catch {}
-    }
-  }
+  members.forEach(member => { memberPreds[member.address.toLowerCase()] = {}; });
+
+  const memberMatchPairs = members.flatMap(member => filtered.map(m => ({ member, m })));
+  await mapWithConcurrencyLimit(memberMatchPairs, 8, async ({ member, m }) => {
+    try {
+      const pred = Number(await readContract.predictions(m.id, member.address));
+      memberPreds[member.address.toLowerCase()][m.id] = pred;
+    } catch {}
+  });
 
   // Pronostici dell'utente corrente per i bottoni
   const myPreds = memberPreds[currentUser?.address?.toLowerCase()] || {};
   const myClaims = {};
   if (currentUser) {
-    for (const m of filtered) {
+    await mapWithConcurrencyLimit(filtered, 8, async (m) => {
       try { myClaims[m.id] = await readContract.claimed(m.id, currentUser.address); } catch {}
-    }
+    });
   }
 
   container.innerHTML = "";
