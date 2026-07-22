@@ -32,7 +32,7 @@ require("dotenv").config({ path: path.join(__dirname, "..", "backend", ".env") }
 
 const { ethers } = require("ethers");
 const fs = require("fs");
-const { claimFor } = require("../backend/sponsor");
+const { claimFor, claimForBatch } = require("../backend/sponsor");
 
 const RPC_URL = process.env.LUKSO_RPC_URL || "https://rpc.testnet.lukso.network";
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
@@ -43,6 +43,31 @@ const FOOTBALL_DATA_API_KEY = process.env.FOOTBALL_DATA_API_KEY;
 const DEPLOY_BLOCK = process.env.CONTRACT_DEPLOY_BLOCK ? Number(process.env.CONTRACT_DEPLOY_BLOCK) : 0;
 
 const MATCHES_DATA_PATH = path.join(__dirname, "..", "backend", "matches-data.json");
+
+// Protezione contro sovrapposizioni: se un giro impiega più dei 30 minuti tra
+// un cron e l'altro (es. molti premi da assegnare su partite popolari), il
+// prossimo giro non deve partire mentre il precedente sta ancora girando —
+// significherebbe due processi che usano la stessa chiave sponsor/oracolo in
+// parallelo, con rischio di conflitti di nonce sulle transazioni.
+const LOCK_FILE_PATH = path.join(__dirname, ".oracle.lock");
+const LOCK_STALE_MS = 55 * 60 * 1000; // oltre questa età, si presume un crash del giro precedente
+
+function acquireLock() {
+  if (fs.existsSync(LOCK_FILE_PATH)) {
+    const ageMs = Date.now() - fs.statSync(LOCK_FILE_PATH).mtimeMs;
+    if (ageMs < LOCK_STALE_MS) {
+      console.log(`Un altro giro dell'oracolo risulta già in corso (lock di ${Math.round(ageMs / 60000)} minuti fa) — salto questa esecuzione.`);
+      return false;
+    }
+    console.log("Lock esistente ma troppo vecchio (probabile crash del giro precedente) — lo ignoro e procedo.");
+  }
+  fs.writeFileSync(LOCK_FILE_PATH, String(process.pid));
+  return true;
+}
+
+function releaseLock() {
+  try { fs.unlinkSync(LOCK_FILE_PATH); } catch {}
+}
 
 if (!CONTRACT_ADDRESS || !ORACLE_PRIVATE_KEY || !FOOTBALL_DATA_API_KEY) {
   console.error("Errore: imposta CONTRACT_ADDRESS, ORACLE_PRIVATE_KEY e FOOTBALL_DATA_API_KEY in backend/.env");
@@ -113,8 +138,10 @@ async function fetchMatchResult(footballDataMatchId) {
 }
 
 /// Rilegge gli eventi PredictionMade per una partita risolta, individua chi ha
-/// pronosticato correttamente e non ha ancora ricevuto il premio, e chiama
-/// claimFor() per ciascuno (via sponsor, come da flusso v3: mai l'utente stesso).
+/// pronosticato correttamente e non ha ancora ricevuto il premio, e assegna i
+/// premi in parallelo (a gruppi limitati) invece che uno alla volta in
+/// sequenza — con molti vincitori, l'attesa sequenziale poteva far durare un
+/// intero giro dell'oracolo più dei 30 minuti tra un cron e l'altro.
 async function assignPrizes(contract, matchId, actualResult) {
   const filter = contract.filters.PredictionMade(matchId);
   const events = await contract.queryFilter(filter, DEPLOY_BLOCK, "latest");
@@ -130,15 +157,26 @@ async function assignPrizes(contract, matchId, actualResult) {
     return;
   }
 
+  // Filtra chi ha già ricevuto il premio in un giro precedente
+  const toClaim = [];
   for (const predictor of correctPredictors) {
     const alreadyClaimed = await contract.claimed(matchId, predictor);
-    if (alreadyClaimed) continue;
+    if (!alreadyClaimed) toClaim.push(predictor);
+  }
 
-    try {
-      const { txHash, tokenId } = await claimFor(matchId, predictor);
-      console.log(`  -> 🏆 Premio assegnato a ${predictor}: tx ${txHash}, tokenId ${tokenId}`);
-    } catch (err) {
-      console.error(`  -> Errore assegnazione premio a ${predictor} per match #${matchId}: ${err.message}`);
+  if (toClaim.length === 0) {
+    console.log(`  -> Tutti i vincitori del match #${matchId} avevano già ricevuto il premio.`);
+    return;
+  }
+
+  console.log(`  -> Assegno il premio a ${toClaim.length} vincitori (in parallelo, a gruppi di 5)...`);
+  const results = await claimForBatch(matchId, toClaim, 5);
+
+  for (const r of results) {
+    if (r.error) {
+      console.error(`  -> Errore assegnazione premio a ${r.winner} per match #${matchId}: ${r.error}`);
+    } else {
+      console.log(`  -> 🏆 Premio assegnato a ${r.winner}: tx ${r.txHash}, tokenId ${r.tokenId}`);
     }
   }
 }
@@ -218,7 +256,13 @@ async function main() {
   console.log("Ciclo completato.");
 }
 
-main().catch((error) => {
-  console.error("Errore generale:", error.message);
-  process.exitCode = 1;
-});
+if (acquireLock()) {
+  main()
+    .catch((error) => {
+      console.error("Errore generale:", error.message);
+      process.exitCode = 1;
+    })
+    .finally(() => {
+      releaseLock();
+    });
+}
