@@ -23,3 +23,6 @@ test/
 # OS
 .DS_Store
 ignition/
+
+# Oracolo: file di lock temporaneo (evita sovrapposizioni tra giri)
+oracle/.oracle.lock
