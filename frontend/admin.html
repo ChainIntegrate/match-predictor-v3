@@ -55,6 +55,39 @@
 
   @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
 
+  /* Tabella utenti registrati: su schermo stretto (es. wallet in-app browser)
+     diventa una serie di schede impilate invece di colonne strette illeggibili. */
+  @media (max-width: 640px) {
+    .users-table { border: none; }
+    .users-table thead { display: none; }
+    .users-table tr {
+      display: block;
+      margin-bottom: 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+    }
+    .users-table td {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 0 !important;
+      border: none !important;
+      text-align: right;
+    }
+    .users-table td::before {
+      content: attr(data-label);
+      font-weight: 600;
+      color: var(--dim);
+      text-align: left;
+      flex-shrink: 0;
+    }
+    .users-table td input[type="number"] { width: 90px !important; text-align: right; }
+    .users-table td[data-label="Utente"] { display: block; text-align: left; }
+    .users-table td[data-label="Utente"]::before { display: block; margin-bottom: 4px; }
+  }
+
   .card {
     background: var(--card);
     border: 1px solid var(--border);
@@ -822,22 +855,22 @@
         const date = new Date(u.created_at * 1000).toLocaleString("it-IT");
         return `
           <tr style="border-bottom:1px solid #333;" data-email="${u.email}">
-            <td style="padding:6px; vertical-align:top;">
+            <td data-label="Utente" style="padding:6px; vertical-align:top;">
               <div>${u.email}</div>
               <div style="font-size:11px; opacity:0.6;">${u.address}${u.is_up ? " (UP propria)" : " (EOA generata)"}</div>
               ${u.display_name ? `<div style="font-size:11px; opacity:0.6;">${u.display_name}</div>` : ""}
               <div style="font-size:11px; opacity:0.6;">iscritto: ${date}</div>
             </td>
-            <td style="padding:6px; vertical-align:top;">
+            <td data-label="Max gruppi creati" style="padding:6px; vertical-align:top;">
               <input type="number" min="0" class="limit-groups-created" value="${u.max_groups_created ?? ""}" placeholder="3 (default)" style="width:100px;">
             </td>
-            <td style="padding:6px; vertical-align:top;">
+            <td data-label="Max gruppi partecipati" style="padding:6px; vertical-align:top;">
               <input type="number" min="0" class="limit-groups-joined" value="${u.max_groups_joined ?? ""}" placeholder="5 (default)" style="width:100px;">
             </td>
-            <td style="padding:6px; vertical-align:top;">
+            <td data-label="Max competizioni" style="padding:6px; vertical-align:top;">
               <input type="number" min="0" class="limit-competitions" value="${u.max_competitions_joined ?? ""}" placeholder="2 (default)" style="width:100px;">
             </td>
-            <td style="padding:6px; vertical-align:top;">
+            <td data-label="" style="padding:6px; vertical-align:top;">
               <button class="btn-ghost btn-save-limits" style="padding:6px 12px; font-size:12px;">Save</button>
               <span class="save-limits-status" style="font-size:11px; margin-left:6px;"></span>
             </td>
@@ -846,7 +879,8 @@
 
       resultEl.innerHTML = `
         <div style="margin-bottom:8px; font-size:12px; opacity:0.7;">${payload.total} utenti registrati — campi vuoti = usa il limite globale di default</div>
-        <table style="width:100%; border-collapse:collapse; font-size:12px;">
+        <table class="users-table" style="width:100%; border-collapse:collapse; font-size:12px;">
+          <thead>
           <tr style="text-align:left; border-bottom:1px solid #555;">
             <th style="padding:6px;">Utente</th>
             <th style="padding:6px;">Max gruppi creati</th>
@@ -854,7 +888,10 @@
             <th style="padding:6px;">Max competizioni</th>
             <th style="padding:6px;"></th>
           </tr>
+          </thead>
+          <tbody>
           ${rows}
+          </tbody>
         </table>`;
       resultEl.className = "result ok";
 
