@@ -443,7 +443,7 @@
       contract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, signer);
       readContract = new ethers.Contract(
         CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI,
-        new ethers.JsonRpcProvider(CONFIG.RPC_URL, 4201, { batchMaxCount: 1, staticNetwork: true })
+        new ethers.JsonRpcProvider(CONFIG.RPC_URL, 4201, { staticNetwork: true })
       );
 
       // Verifica che sia owner
@@ -1091,7 +1091,7 @@
     const { ethers } = window;
     const key = document.getElementById("sponsor-key").value.trim();
     if (!key) throw new Error("Inserisci la sponsor private key.");
-    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 4201, { batchMaxCount: 1, staticNetwork: true });
+    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 4201, { staticNetwork: true });
     const wallet = new ethers.Wallet(key, provider);
     return new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, wallet);
   }
@@ -1100,7 +1100,7 @@
     const { ethers } = window;
     const key = document.getElementById("oracle-key").value.trim();
     if (!key) throw new Error("Inserisci la oracle private key.");
-    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 4201, { batchMaxCount: 1, staticNetwork: true });
+    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 4201, { staticNetwork: true });
     const wallet = new ethers.Wallet(key, provider);
     return new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, wallet);
   }

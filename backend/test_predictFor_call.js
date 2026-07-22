@@ -13,7 +13,7 @@ const ABI = [
 ];
 
 async function main() {
-  const provider = new ethers.JsonRpcProvider(RPC_URL, undefined, { batchMaxCount: 1 });
+  const provider = new ethers.JsonRpcProvider(RPC_URL, undefined, {});
   const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, provider);
 
   let matchId = process.argv[2];

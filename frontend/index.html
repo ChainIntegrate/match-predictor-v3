@@ -1261,10 +1261,13 @@ async function initEthers() {
   if (ethersLib && readContract) return;
   const { ethers } = await import("https://cdn.jsdelivr.net/npm/ethers@6.13.4/+esm");
   ethersLib = ethers;
-  // batchMaxCount:1 disabilita il raggruppamento automatico delle chiamate —
-  // necessario perché il proxy RPC di Blockscout rifiuta payload grandi (413)
-  // quando ethers accorpa molte letture in un'unica richiesta HTTP.
-  const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 4201, { batchMaxCount: 1, staticNetwork: true });
+  // Il raggruppamento automatico delle chiamate (batching) è lasciato attivo
+  // di default: con thirdweb il limite reale è sulle richieste HTTP al
+  // secondo (RPS), non sulla dimensione del payload — raggruppare più letture
+  // in un'unica richiesta HTTP RIDUCE il numero di richieste, non lo aumenta.
+  // (Con Blockscout era il contrario: rifiutava payload grandi con 413, da lì
+  // la scelta precedente di disabilitare il batching — non più valida qui.)
+  const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 4201, { staticNetwork: true });
   readContract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, provider);
 }
 

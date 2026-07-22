@@ -25,7 +25,7 @@ async function main() {
     process.exit(1);
   }
 
-  const provider = new ethers.JsonRpcProvider(RPC_URL, 4201, { batchMaxCount: 1, staticNetwork: true });
+  const provider = new ethers.JsonRpcProvider(RPC_URL, 4201, { staticNetwork: true });
   const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, provider);
 
   const m = await contract.getMatch(matchId);
