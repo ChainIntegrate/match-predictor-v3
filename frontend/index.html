@@ -828,19 +828,27 @@
       <input type="text" class="field" id="group-name" placeholder="Group name" maxlength="50">
       <input type="text" class="field" id="group-desc" placeholder="Description (optional)" maxlength="200">
 
-      <div style="margin-top:14px; font-size:12px; color:var(--chalk-dim);" data-i18n="select_matches_label">
-        Select which matches count for this group
-      </div>
-      <div class="match-select-list" id="create-group-match-list">
-        <div class="match-select-bar">
-          <input type="checkbox" id="create-group-select-all" checked>
-          <label for="create-group-select-all" style="margin:0; cursor:pointer;" data-i18n="select_all">Select all</label>
-          <span id="create-group-selected-count" style="margin-left:auto;"></span>
+      <div id="create-group-competition-picker" style="margin-top:14px;"></div>
+
+      <div id="create-group-matches-section" style="display:none; margin-top:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+          <span class="match-meta" id="create-group-competition-label" style="margin:0;"></span>
+          <button class="btn-ghost btn-sm" id="btn-change-group-competition" data-i18n="change_competition">Change</button>
         </div>
-        <div id="create-group-match-items"></div>
+        <div style="font-size:12px; color:var(--chalk-dim);" data-i18n="select_matches_label">
+          Select which matches count for this group
+        </div>
+        <div class="match-select-list" id="create-group-match-list">
+          <div class="match-select-bar">
+            <input type="checkbox" id="create-group-select-all" checked>
+            <label for="create-group-select-all" style="margin:0; cursor:pointer;" data-i18n="select_all">Select all</label>
+            <span id="create-group-selected-count" style="margin-left:auto;"></span>
+          </div>
+          <div id="create-group-match-items"></div>
+        </div>
       </div>
 
-      <button class="btn-primary" id="btn-create-group" data-i18n="create_btn">Create group</button>
+      <button class="btn-primary" id="btn-create-group" data-i18n="create_btn" style="margin-top:14px;">Create group</button>
       <div class="status" id="create-status" style="display:none; padding: 12px 0;"></div>
     </div>
 
@@ -990,6 +998,7 @@ const strings = {
     link_sent_sub: "We sent a magic link. Click it to log in. Valid for 15 minutes.",
     upcoming: "Upcoming", played: "Played",
     back_to_competitions: "Back to competitions", choose_competition: "Choose a competition",
+    change_competition: "Change", choose_competition_first: "Choose a competition first",
     joined: "Joined", not_joined: "Not joined yet",
     competitions_joined_label: "competitions joined", request_more: "Request more",
     more_competitions_reason: "an additional competition slot",
@@ -1057,6 +1066,7 @@ const strings = {
     link_sent_sub: "Abbiamo inviato un link magico. Cliccalo per accedere. Valido 15 minuti.",
     upcoming: "Da giocare", played: "Giocate",
     back_to_competitions: "Torna alle competizioni", choose_competition: "Scegli una competizione",
+    change_competition: "Cambia", choose_competition_first: "Scegli prima una competizione",
     joined: "Iscritto", not_joined: "Non ancora iscritto",
     competitions_joined_label: "competizioni a cui sei iscritto", request_more: "Richiedi di più",
     more_competitions_reason: "uno slot competizione in più",
@@ -2210,7 +2220,7 @@ function showTab(tabName) {
       if (!el.closest("#manage-matches-panel")) el.style.display = "block";
     });
     renderGroups();
-    populateCreateGroupMatchList();
+    showCreateGroupCompetitionPicker();
   }
 }
 
@@ -2533,16 +2543,56 @@ document.getElementById("btn-join-group").addEventListener("click", async () => 
   await joinGroup(code);
 });
 
-// Groups: popola la checklist partite per la creazione gruppo
-let createGroupMatches = [];
+// Groups: creazione — prima si sceglie la competizione (richiede iscrizione,
+// come per Partite/I miei pronostici/Classifica), poi si vedono solo le sue
+// partite ancora da giocare.
+let createGroupMatches = [];      // solo le partite selezionabili (competizione scelta, non ancora giocate)
+let createGroupAllMatchIds = [];  // TUTTI i matchId esistenti — serve per calcolare le esclusioni corrette
+let createGroupCompetition = null;
 
-async function populateCreateGroupMatchList() {
+function showCreateGroupCompetitionPicker() {
+  createGroupCompetition = null;
+  document.getElementById("create-group-matches-section").style.display = "none";
+  renderCompetitionPicker("create-group-competition-picker", populateCreateGroupMatchList);
+}
+
+document.getElementById("btn-change-group-competition").addEventListener("click", showCreateGroupCompetitionPicker);
+
+async function populateCreateGroupMatchList(competitionCode) {
+  createGroupCompetition = competitionCode;
+  document.getElementById("create-group-competition-picker").style.display = "none";
+  document.getElementById("create-group-matches-section").style.display = "block";
+  document.getElementById("create-group-competition-label").textContent =
+    COMPETITION_NAMES[competitionCode] || competitionCode;
+
   const container = document.getElementById("create-group-match-items");
   container.innerHTML = `<div style="padding:12px; color:var(--chalk-dim); font-size:12px;">${t("loading")}</div>`;
 
   try {
-    createGroupMatches = await loadMatchesFromChain();
-    createGroupMatches.sort((a, b) => Number(a.predictionDeadline) - Number(b.predictionDeadline));
+    if (!matchesData.matches || matchesData.matches.length === 0) {
+      const dataRes = await api("GET", "/matches-data", null, false);
+      matchesData = dataRes.data || { matches: [] };
+    }
+    // Serve per calcolare le esclusioni corrette: tutte le partite esistenti,
+    // non solo quelle di questa lega — non richiede letture on-chain, viene
+    // dalla cache.
+    createGroupAllMatchIds = matchesData.matches.map(m => m.contractMatchId);
+
+    const idsForCompetition = matchesData.matches
+      .filter(m => (m.competition || "WC") === competitionCode)
+      .map(m => m.contractMatchId);
+
+    const matches = await loadMatchesFromChain(idsForCompetition);
+    const now = Date.now();
+    createGroupMatches = matches
+      .filter(m => !m.resolved && now < Number(m.predictionDeadline) * 1000)
+      .sort((a, b) => Number(a.predictionDeadline) - Number(b.predictionDeadline));
+
+    if (createGroupMatches.length === 0) {
+      container.innerHTML = `<div style="padding:12px; color:var(--chalk-dim); font-size:12px;">${t("no_matches")}</div>`;
+      updateCreateGroupSelectedCount();
+      return;
+    }
 
     container.innerHTML = "";
     createGroupMatches.forEach((m) => {
@@ -2557,6 +2607,7 @@ async function populateCreateGroupMatchList() {
       div.querySelector("input").addEventListener("change", updateCreateGroupSelectedCount);
       container.appendChild(div);
     });
+    document.getElementById("create-group-select-all").checked = true;
     updateCreateGroupSelectedCount();
   } catch (err) {
     container.innerHTML = `<div style="padding:12px; color:var(--red); font-size:12px;">${err.message}</div>`;
@@ -2580,13 +2631,19 @@ document.getElementById("create-group-select-all").addEventListener("change", (e
 document.getElementById("btn-create-group").addEventListener("click", async () => {
   const name = document.getElementById("group-name").value.trim();
   if (!name) return;
+  if (!createGroupCompetition) { alert(t("choose_competition_first")); return; }
   const desc = document.getElementById("group-desc").value.trim();
 
-  // Le partite deselezionate diventano "escluse" per questo gruppo — il backend
-  // salva solo la lista di esclusioni (group_excluded_matches), non l'inclusione.
-  const excludedMatchIds = createGroupMatches
-    .filter(m => !document.getElementById(`cg-match-${m.id}`)?.checked)
-    .map(m => m.id);
+  // Il gruppo conta solo le partite selezionate della lega scelta — tutto il
+  // resto (altre leghe, partite già giocate, partite deselezionate qui) va
+  // escluso esplicitamente: il backend salva solo la lista di esclusioni
+  // (group_excluded_matches), il default è "tutto incluso".
+  const includedIds = new Set(
+    createGroupMatches
+      .filter(m => document.getElementById(`cg-match-${m.id}`)?.checked)
+      .map(m => m.id)
+  );
+  const excludedMatchIds = createGroupAllMatchIds.filter(id => !includedIds.has(id));
 
   const res = await api("POST", "/groups", { name, description: desc, excludedMatchIds });
   const statusEl = document.getElementById("create-status");
@@ -2597,6 +2654,7 @@ document.getElementById("btn-create-group").addEventListener("click", async () =
     document.getElementById("group-name").value = "";
     document.getElementById("group-desc").value = "";
     await renderGroups();
+    showCreateGroupCompetitionPicker();
   } else {
     statusEl.style.color = "var(--red)";
     if (res.error?.includes("massimo")) {
