@@ -792,6 +792,10 @@
     return document.getElementById("backend-url").value.replace(/\/matches-data\/?$/, "/admin/users");
   }
 
+  function setUserLimitsEndpoint() {
+    return document.getElementById("backend-url").value.replace(/\/matches-data\/?$/, "/admin/set-user-limits");
+  }
+
   document.getElementById("btn-load-users").addEventListener("click", async () => {
     if (!signer) { alert("Connetti prima la UP."); return; }
 
@@ -814,17 +818,85 @@
       const payload = await res.json();
       if (!payload.success) throw new Error(payload.error);
 
-      let output = `${payload.total} utenti registrati:\n\n`;
-      payload.users.forEach(u => {
+      const rows = payload.users.map(u => {
         const date = new Date(u.created_at * 1000).toLocaleString("it-IT");
-        output += `${u.email}\n`;
-        output += `  address: ${u.address}${u.is_up ? " (UP propria)" : " (EOA generata)"}\n`;
-        if (u.display_name) output += `  nome: ${u.display_name}\n`;
-        output += `  iscritto: ${date}\n\n`;
-      });
+        return `
+          <tr style="border-bottom:1px solid #333;" data-email="${u.email}">
+            <td style="padding:6px; vertical-align:top;">
+              <div>${u.email}</div>
+              <div style="font-size:11px; opacity:0.6;">${u.address}${u.is_up ? " (UP propria)" : " (EOA generata)"}</div>
+              ${u.display_name ? `<div style="font-size:11px; opacity:0.6;">${u.display_name}</div>` : ""}
+              <div style="font-size:11px; opacity:0.6;">iscritto: ${date}</div>
+            </td>
+            <td style="padding:6px; vertical-align:top;">
+              <input type="number" min="0" class="limit-groups-created" value="${u.max_groups_created ?? ""}" placeholder="3 (default)" style="width:100px;">
+            </td>
+            <td style="padding:6px; vertical-align:top;">
+              <input type="number" min="0" class="limit-groups-joined" value="${u.max_groups_joined ?? ""}" placeholder="5 (default)" style="width:100px;">
+            </td>
+            <td style="padding:6px; vertical-align:top;">
+              <input type="number" min="0" class="limit-competitions" value="${u.max_competitions_joined ?? ""}" placeholder="2 (default)" style="width:100px;">
+            </td>
+            <td style="padding:6px; vertical-align:top;">
+              <button class="btn-ghost btn-save-limits" style="padding:6px 12px; font-size:12px;">Save</button>
+              <span class="save-limits-status" style="font-size:11px; margin-left:6px;"></span>
+            </td>
+          </tr>`;
+      }).join("");
 
-      resultEl.textContent = output;
+      resultEl.innerHTML = `
+        <div style="margin-bottom:8px; font-size:12px; opacity:0.7;">${payload.total} utenti registrati — campi vuoti = usa il limite globale di default</div>
+        <table style="width:100%; border-collapse:collapse; font-size:12px;">
+          <tr style="text-align:left; border-bottom:1px solid #555;">
+            <th style="padding:6px;">Utente</th>
+            <th style="padding:6px;">Max gruppi creati</th>
+            <th style="padding:6px;">Max gruppi partecipati</th>
+            <th style="padding:6px;">Max competizioni</th>
+            <th style="padding:6px;"></th>
+          </tr>
+          ${rows}
+        </table>`;
       resultEl.className = "result ok";
+
+      resultEl.querySelectorAll(".btn-save-limits").forEach(saveBtn => {
+        saveBtn.addEventListener("click", async () => {
+          const row = saveBtn.closest("tr");
+          const email = row.dataset.email;
+          const statusSpan = row.querySelector(".save-limits-status");
+          saveBtn.disabled = true;
+          statusSpan.textContent = "Confirm signature…";
+          statusSpan.style.color = "var(--dim)";
+
+          try {
+            const timestamp = Date.now();
+            const message = `MatchPredictor admin update - ${timestamp}`;
+            const signature = await signer.signMessage(message);
+
+            const body = {
+              message, signature, email,
+              maxGroupsCreated: row.querySelector(".limit-groups-created").value,
+              maxGroupsJoined: row.querySelector(".limit-groups-joined").value,
+              maxCompetitionsJoined: row.querySelector(".limit-competitions").value
+            };
+
+            const saveRes = await fetch(setUserLimitsEndpoint(), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body)
+            });
+            const savePayload = await saveRes.json();
+            if (!savePayload.success) throw new Error(savePayload.error);
+
+            statusSpan.textContent = "✓ Saved";
+            statusSpan.style.color = "var(--green)";
+          } catch (err) {
+            statusSpan.textContent = "❌ " + err.message;
+            statusSpan.style.color = "var(--red)";
+          } finally {
+            saveBtn.disabled = false;
+          }
+        });
+      });
     } catch (err) {
       resultEl.textContent = "❌ " + err.message;
       resultEl.className = "result err";

@@ -395,10 +395,47 @@ app.post("/api/admin/users", async (req, res) => {
   if (!isValid) return res.status(403).json({ success: false, error: "Firma non autorizzata" });
 
   const users = db.prepare(
-    "SELECT email, address, is_up, display_name, created_at FROM users ORDER BY created_at DESC"
+    "SELECT email, address, is_up, display_name, max_groups_created, max_groups_joined, max_competitions_joined, created_at FROM users ORDER BY created_at DESC"
   ).all();
 
   res.json({ success: true, users, total: users.length });
+});
+
+// ── Admin: imposta override personalizzati ai limiti di un utente ─────────
+// POST /api/admin/set-user-limits  { message, signature, email, maxGroupsCreated, maxGroupsJoined, maxCompetitionsJoined }
+// Ogni valore null/vuoto azzera l'override (torna al default globale per tutti).
+app.post("/api/admin/set-user-limits", async (req, res) => {
+  const { message, signature, email, maxGroupsCreated, maxGroupsJoined, maxCompetitionsJoined } = req.body;
+  if (!message || !signature || !email) {
+    return res.status(400).json({ success: false, error: "Body non valido" });
+  }
+
+  const timestampMatch = message.match(/(\d{13})/);
+  if (!timestampMatch) return res.status(400).json({ success: false, error: "Timestamp mancante nel messaggio" });
+  const ageMs = Date.now() - parseInt(timestampMatch[1], 10);
+  if (ageMs > 5 * 60 * 1000 || ageMs < -60 * 1000) {
+    return res.status(401).json({ success: false, error: "Firma scaduta" });
+  }
+
+  const isValid = await verifyOwnerSignature(message, signature);
+  if (!isValid) return res.status(403).json({ success: false, error: "Firma non autorizzata" });
+
+  const user = db.prepare("SELECT id FROM users WHERE email = ?").get(email.toLowerCase().trim());
+  if (!user) return res.status(404).json({ success: false, error: "Utente non trovato" });
+
+  const toIntOrNull = v => (v === null || v === undefined || v === "") ? null : parseInt(v, 10);
+
+  db.prepare(`
+    UPDATE users SET max_groups_created = ?, max_groups_joined = ?, max_competitions_joined = ?
+    WHERE id = ?
+  `).run(
+    toIntOrNull(maxGroupsCreated),
+    toIntOrNull(maxGroupsJoined),
+    toIntOrNull(maxCompetitionsJoined),
+    user.id
+  );
+
+  res.json({ success: true });
 });
 
 // ── Admin: pin JSON su IPFS via Pinata (solo owner, firma ERC-1271) ───────
