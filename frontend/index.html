@@ -1634,6 +1634,7 @@ async function renderMatches(filter = "upcoming") {
 function buildMatchCard(m, extra, myPred, claimed) {
   const div = document.createElement("div");
   div.className = "match-card";
+  div.dataset.matchId = m.id;
 
   const deadline = Number(m.predictionDeadline) * 1000;
   const now = Date.now();
@@ -2379,6 +2380,39 @@ function updateFloatingConfirm() {
   }
 }
 
+// Aggiorna una singola card partita (dati, pronostico, riscatto, conteggio),
+// senza toccare le altre — usata dopo un pronostico invece di ricaricare
+// l'intera lega, che genererebbe molte più chiamate del necessario.
+async function refreshSingleMatchCard(matchId) {
+  await initEthers();
+  try {
+    const raw = await readContract.getMatch(matchId);
+    const m = { id: matchId, teamHome: raw.teamHome, teamAway: raw.teamAway,
+      predictionDeadline: raw.predictionDeadline, resolved: raw.resolved,
+      actualResult: raw.actualResult, exists: raw.exists };
+
+    let myPred = 0, claimed = false;
+    if (currentUser) {
+      try {
+        myPred = Number(await readContract.predictions(matchId, currentUser.address));
+        claimed = await readContract.claimed(matchId, currentUser.address);
+      } catch {}
+    }
+
+    // Il conteggio pronostici era in cache dal caricamento precedente — va
+    // invalidato per questa singola partita, così riflette il nuovo pronostico.
+    predictionEventsCache.delete(matchId);
+    await fetchAllPredictionEvents([matchId]);
+
+    const extra = matchesData.matches.find(x => x.contractMatchId === matchId) || {};
+    const newCard = buildMatchCard(m, extra, myPred, claimed);
+    const oldCard = document.querySelector(`[data-match-id="${matchId}"]`);
+    if (oldCard) oldCard.replaceWith(newCard);
+  } catch (err) {
+    console.error(`Errore aggiornamento card partita #${matchId}:`, err.message);
+  }
+}
+
 async function confirmPredictions() {
   const btn = document.getElementById("floating-confirm-btn");
   if (pendingPredictions.size === 0) return;
@@ -2394,28 +2428,17 @@ async function confirmPredictions() {
       : await api("POST", "/predict/batch", { predictions: matchIds.map((id, i) => ({ matchId: id, predictedResult: results[i] })) });
 
     if (res.success) {
-      // Aggiorna visivamente: pending → selected
-      pendingPredictions.forEach((code, matchId) => {
-        const rows = document.querySelectorAll(".pred-row");
-        rows.forEach(row => {
-          const btns = row.querySelectorAll(".pred-btn");
-          // Cerca la riga corrispondente al matchId
-          // (i bottoni pending diventano selected)
-          btns.forEach((b, i) => {
-            if (b.classList.contains("pending")) {
-              b.className = "pred-btn selected";
-              b.disabled = true;
-            } else {
-              b.disabled = true;
-            }
-          });
-        });
-      });
+      const confirmedIds = [...pendingPredictions.keys()];
       pendingPredictions.clear();
       updateFloatingConfirm();
-      // Ricarica le partite per aggiornare lo stato corretto
-      setTimeout(() => renderMatches("upcoming"), 1000);
       document.getElementById("modal-predicting").style.display = "none";
+
+      // Aggiorna solo le card delle partite appena pronosticate, non l'intera
+      // lega — con 28 partite, ricaricare tutto dopo ogni pronostico generava
+      // un picco di richieste evitabile.
+      setTimeout(() => {
+        confirmedIds.forEach(id => refreshSingleMatchCard(id));
+      }, 1000);
     } else {
       alert(res.error || "Error sending predictions");
       document.getElementById("modal-predicting").style.display = "none";
