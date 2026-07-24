@@ -3,7 +3,7 @@
 const { ethers } = require("ethers");
 const { INTERFACE_ID_LSP0 } = require("@lukso/lsp0-contracts");
 
-const provider = new ethers.JsonRpcProvider(process.env.LUKSO_RPC_URL, 4201, { staticNetwork: true });
+const provider = new ethers.JsonRpcProvider(process.env.LUKSO_RPC_URL, 42, { staticNetwork: true });
 const ERC165_ABI = ["function supportsInterface(bytes4) view returns (bool)"];
 
 /// Valida un indirizzo come Universal Profile: formato, presenza di codice on-chain,
