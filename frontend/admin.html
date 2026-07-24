@@ -232,7 +232,7 @@
 <header>
   <div>
     <h1>⚙️ MatchPredictor v3 — Admin Panel</h1>
-    <div class="tag" id="network-tag">LUKSO Testnet · 0xE7EFa63E4923626274fbb18319aC4C57377c7BBf</div>
+    <div class="tag" id="network-tag">LUKSO Mainnet · 0xf3D944E7061E896352C9082fe7866Ddbd436398d</div>
   </div>
   <div class="up-bar">
     <div id="up-status">
@@ -420,8 +420,8 @@
   // CONFIG
   // ============================================================
   const CONFIG = {
-    CONTRACT_ADDRESS: "0xE7EFa63E4923626274fbb18319aC4C57377c7BBf",
-    RPC_URL: "https://lukso-testnet.rpc.thirdweb.com/5a1ce665bbd8bf85b8180be26981ade4",
+    CONTRACT_ADDRESS: "0xf3D944E7061E896352C9082fe7866Ddbd436398d",
+    RPC_URL: "https://42.rpc.thirdweb.com/5a1ce665bbd8bf85b8180be26981ade4",
     CHAIN_ID_HEX: "0x1069",
     IPFS_GATEWAY: "https://api.universalprofile.cloud/ipfs/",
     FOOTBALL_DATA_PROXY: "https://playmatchpredictor.chainintegrate.it/api/upcoming-matches"
@@ -476,7 +476,7 @@
       contract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, signer);
       readContract = new ethers.Contract(
         CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI,
-        new ethers.JsonRpcProvider(CONFIG.RPC_URL, 4201, { staticNetwork: true })
+        new ethers.JsonRpcProvider(CONFIG.RPC_URL, 42, { staticNetwork: true })
       );
 
       // Verifica che sia owner
@@ -1128,7 +1128,7 @@
     const { ethers } = window;
     const key = document.getElementById("sponsor-key").value.trim();
     if (!key) throw new Error("Inserisci la sponsor private key.");
-    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 4201, { staticNetwork: true });
+    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 42, { staticNetwork: true });
     const wallet = new ethers.Wallet(key, provider);
     return new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, wallet);
   }
@@ -1137,7 +1137,7 @@
     const { ethers } = window;
     const key = document.getElementById("oracle-key").value.trim();
     if (!key) throw new Error("Inserisci la oracle private key.");
-    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 4201, { staticNetwork: true });
+    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 42, { staticNetwork: true });
     const wallet = new ethers.Wallet(key, provider);
     return new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, wallet);
   }

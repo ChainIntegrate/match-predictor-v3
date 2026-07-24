@@ -1,6 +1,6 @@
 .env
-matchpredictor.db
-matchpredictor.db-shm
-matchpredictor.db-wal
+*.db
+*.db-shm
+*.db-wal
 node_modules/
 matches-data.json

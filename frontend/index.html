@@ -650,7 +650,7 @@
         MatchPredictor
       </div>
     </div>
-    <span class="badge-testnet" id="network-badge">TESTNET</span>
+    <button id="lang-toggle-btn" class="btn-ghost btn-sm" style="margin-left:10px;" title="Change language / Cambia lingua"></button>
   </div>
   <div class="powered-by">
   <span data-i18n="powered_by">Powered by</span>
@@ -709,6 +709,9 @@
           <label data-i18n="email_label">Email address</label>
           <input type="email" id="login-email" placeholder="you@example.com">
         </div>
+        <div class="match-meta" style="margin-bottom:12px; text-align:left;" data-i18n="magic_link_explainer">
+          ℹ️ We'll send a secure sign-in link to this email — no password needed. Click it within 15 minutes to access your account.
+        </div>
         <button class="btn-primary" id="btn-send-link" disabled data-i18n="send_link">Send magic link</button>
         <div class="status" id="login-status" style="display:none;"></div>
       </div>
@@ -742,6 +745,9 @@
         <div class="checkbox-group">
           <input type="checkbox" id="check-marketing">
           <label for="check-marketing" data-i18n="marketing_consent">Send me an email only when there's something worth telling — new competitions, standout wins. Nothing frequent, unsubscribe anytime.</label>
+        </div>
+        <div class="match-meta" style="margin-bottom:12px; text-align:left;" data-i18n="magic_link_explainer">
+          ℹ️ We'll send a secure sign-in link to this email — no password needed. Click it within 15 minutes to access your account.
         </div>
         <button class="btn-primary" id="btn-register" disabled data-i18n="register_btn">Create account</button>
         <div class="status" id="register-status" style="display:none;"></div>
@@ -954,8 +960,8 @@
 // ============================================================
 const CONFIG = {
   API_BASE: "https://playmatchpredictor.chainintegrate.it/api",
-  RPC_URL: "https://lukso-testnet.rpc.thirdweb.com/5a1ce665bbd8bf85b8180be26981ade4",
-  CONTRACT_ADDRESS: "0xE7EFa63E4923626274fbb18319aC4C57377c7BBf",
+  RPC_URL: "https://42.rpc.thirdweb.com/5a1ce665bbd8bf85b8180be26981ade4",
+  CONTRACT_ADDRESS: "0xf3D944E7061E896352C9082fe7866Ddbd436398d",
   TOKEN_STORY_KEY: "0xc345e2857e55742bc896212b499925391cc94c97152776066ccf64e4df74ee09"
 };
 
@@ -973,7 +979,7 @@ const RESULT_LABELS = { 1: "Home", 2: "Draw", 3: "Away" };
 // ============================================================
 // i18n
 // ============================================================
-const lang = navigator.language?.startsWith("it") ? "it" : "en";
+let lang = localStorage.getItem("mp-lang") || (navigator.language?.startsWith("it") ? "it" : "en");
 
 const strings = {
   en: {
@@ -997,6 +1003,9 @@ const strings = {
     link_sent_title: "Check your email!",
     link_sent_sub: "We sent a magic link. Click it to log in. Valid for 15 minutes.",
     upcoming: "Upcoming", played: "Played",
+    toggle_login: "Login", toggle_register: "Register",
+    register_btn: "Create account",
+    magic_link_explainer: "ℹ️ We'll send a secure sign-in link to this email — no password needed. Click it within 15 minutes to access your account.",
     back_to_competitions: "Back to competitions", choose_competition: "Choose a competition",
     change_competition: "Change", choose_competition_first: "Choose a competition first",
     joined: "Joined", not_joined: "Not joined yet",
@@ -1062,6 +1071,7 @@ const strings = {
     send_link: "Invia link magico",
     toggle_login: "Accedi", toggle_register: "Registrati",
     register_btn: "Crea account",
+    magic_link_explainer: "ℹ️ Ti mandiamo un link sicuro per accedere a questa email — nessuna password necessaria. Cliccalo entro 15 minuti per accedere al tuo account.",
     link_sent_title: "Controlla la tua email!",
     link_sent_sub: "Abbiamo inviato un link magico. Cliccalo per accedere. Valido 15 minuti.",
     upcoming: "Da giocare", played: "Giocate",
@@ -1267,7 +1277,7 @@ async function initEthers() {
   // in un'unica richiesta HTTP RIDUCE il numero di richieste, non lo aumenta.
   // (Con Blockscout era il contrario: rifiutava payload grandi con 413, da lì
   // la scelta precedente di disabilitare il batching — non più valida qui.)
-  const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 4201, { staticNetwork: true });
+  const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 42, { staticNetwork: true });
   readContract = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, provider);
 }
 
@@ -2302,6 +2312,14 @@ function showTab(tabName) {
 // ============================================================
 async function init() {
   applyI18n();
+
+  // Pulsante cambio lingua: mostra la lingua a cui passeresti cliccando
+  const langBtn = document.getElementById("lang-toggle-btn");
+  langBtn.textContent = lang === "it" ? "EN" : "IT";
+  langBtn.addEventListener("click", () => {
+    localStorage.setItem("mp-lang", lang === "it" ? "en" : "it");
+    location.reload();
+  });
 
   // Magic link redirect
   const loggedViaLink = await handleMagicLinkRedirect();
