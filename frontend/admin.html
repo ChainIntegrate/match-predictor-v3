@@ -287,27 +287,6 @@
     </div>
   </div>
 
-  <!-- SEZIONE 2: Crea singola partita -->
-  <div class="card">
-    <h2>➕ Create single match</h2>
-    <label>Home team</label>
-    <input type="text" id="team-home" placeholder="e.g. Italy">
-    <label>Away team</label>
-    <input type="text" id="team-away" placeholder="e.g. Brazil">
-    <div class="row">
-      <div>
-        <label>Kickoff date</label>
-        <input type="date" id="kickoff-date">
-      </div>
-      <div>
-        <label>Kickoff time (UTC)</label>
-        <input type="time" id="kickoff-time">
-      </div>
-    </div>
-    <button class="btn-primary btn-full" id="btn-create-single">Create match on-chain</button>
-    <div class="result" id="single-result"></div>
-  </div>
-
   <!-- SEZIONE 3: Salva dati su server -->
   <div class="card">
     <h2>💾 Save matches data to server</h2>
@@ -360,57 +339,14 @@
     <div class="result" id="users-result" style="max-height:400px; overflow-y:auto;"></div>
   </div>
 
-  <!-- SEZIONE 5: Test funzioni sponsor/oracle -->
+  <!-- SEZIONE 5: Saldi sponsor/oracolo -->
   <div class="card full">
-    <h2>🧪 Test sponsor / oracle functions</h2>
-    <p style="color: var(--dim); font-size: 12px; line-height: 1.6; margin-bottom: 16px;">
-      Queste funzioni chiamano il contratto direttamente tramite chiavi private — 
-      solo per test. In produzione saranno gestite dal backend.
+    <h2>💰 Sponsor / Oracle balances</h2>
+    <p style="color: var(--dim); font-size: 12px; line-height: 1.6; margin-bottom: 12px;">
+      Legge gli indirizzi sponsor/oracolo direttamente dal contratto e il loro saldo LYX attuale.
     </p>
-    <div class="row">
-      <div>
-        <label>Match ID</label>
-        <input type="number" id="test-match-id" placeholder="0">
-      </div>
-      <div>
-        <label>Predictor address</label>
-        <input type="text" id="test-predictor" placeholder="0x...">
-      </div>
-    </div>
-    <div class="row" style="margin-top: 8px;">
-      <div>
-        <label>Predicted result</label>
-        <select id="test-result">
-          <option value="1">1 — Home Win</option>
-          <option value="2">2 — Draw</option>
-          <option value="3">3 — Away Win</option>
-        </select>
-      </div>
-      <div>
-        <label>Sponsor private key</label>
-        <input type="password" id="sponsor-key" placeholder="0x... (non salvata)">
-      </div>
-    </div>
-    <div style="display:flex; gap:8px; margin-top:12px;">
-      <button class="btn-primary" id="btn-predict-for" style="flex:1;">predictFor()</button>
-      <button class="btn-danger" id="btn-claim-for" style="flex:1;">claimFor()</button>
-    </div>
-    <div class="row" style="margin-top: 12px;">
-      <div>
-        <label>Oracle private key</label>
-        <input type="password" id="oracle-key" placeholder="0x... (non salvata)">
-      </div>
-      <div>
-        <label>Actual result</label>
-        <select id="actual-result">
-          <option value="1">1 — Home Win</option>
-          <option value="2">2 — Draw</option>
-          <option value="3">3 — Away Win</option>
-        </select>
-      </div>
-    </div>
-    <button class="btn-danger btn-full" id="btn-report-result" style="margin-top:8px;">reportResult()</button>
-    <div class="result" id="test-result-output"></div>
+    <button class="btn-primary btn-full" id="btn-check-balances">Check balances</button>
+    <div class="result" id="balances-result"></div>
   </div>
 
 </div>
@@ -428,15 +364,13 @@
   };
 
   const CONTRACT_ABI = [
-    "function createMatch(string teamHome, string teamAway, uint256 predictionDeadline) external returns (uint256)",
     "function createMatchBatch(string[] teamHomes, string[] teamAways, uint256[] predictionDeadlines) external returns (uint256[])",
-    "function predictFor(uint256 matchId, uint8 predictedResult, address predictor) external",
-    "function reportResult(uint256 matchId, uint8 actualResult) external",
-    "function claimFor(uint256 matchId, address winner) external",
     "function setData(bytes32 dataKey, bytes dataValue) external",
     "function getDataForTokenId(bytes32 tokenId, bytes32 dataKey) external view returns (bytes)",
     "function setDataBatchForTokenIds(bytes32[] tokenIds, bytes32[] dataKeys, bytes[] dataValues) external",
     "function owner() external view returns (address)",
+    "function oracle() external view returns (address)",
+    "function sponsor() external view returns (address)",
     "function getMatch(uint256 matchId) external view returns (tuple(string teamHome, string teamAway, uint256 predictionDeadline, bool resolved, uint8 actualResult, bool exists))",
     "event MatchCreated(uint256 indexed matchId, string teamHome, string teamAway, uint256 predictionDeadline)",
     "event PrizeClaimed(uint256 indexed matchId, address indexed winner, bytes32 tokenId)"
@@ -663,54 +597,6 @@
     } finally {
       btn.disabled = false;
       btn.textContent = "Create selected matches on-chain";
-    }
-  });
-
-  // ============================================================
-  // CREA SINGOLA PARTITA
-  // ============================================================
-  document.getElementById("btn-create-single").addEventListener("click", async () => {
-    if (!contract) { alert("Connetti prima la UP."); return; }
-
-    const teamHome = document.getElementById("team-home").value.trim();
-    const teamAway = document.getElementById("team-away").value.trim();
-    const dateVal = document.getElementById("kickoff-date").value;
-    const timeVal = document.getElementById("kickoff-time").value;
-
-    if (!teamHome || !teamAway || !dateVal || !timeVal) {
-      alert("Compila tutti i campi.");
-      return;
-    }
-
-    const deadline = Math.floor(new Date(`${dateVal}T${timeVal}:00Z`).getTime() / 1000);
-    const resultEl = document.getElementById("single-result");
-    const btn = document.getElementById("btn-create-single");
-
-    btn.disabled = true;
-    btn.textContent = "Confirm in your UP extension…";
-    resultEl.className = "result";
-    resultEl.textContent = "Sending transaction…";
-
-    try {
-      const tx = await contract.createMatch(teamHome, teamAway, deadline);
-      resultEl.textContent = "Waiting for confirmation…";
-      const receipt = await tx.wait();
-
-      const { ethers } = window;
-      const event = receipt.logs
-        .map(log => { try { return contract.interface.parseLog(log); } catch { return null; } })
-        .find(e => e?.name === "MatchCreated");
-
-      const matchId = event ? event.args.matchId.toString() : "?";
-      resultEl.textContent = `✅ Match created with ID ${matchId}`;
-      resultEl.className = "result ok";
-
-    } catch (err) {
-      resultEl.textContent = "❌ " + err.message;
-      resultEl.className = "result err";
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "Create match on-chain";
     }
   });
 
@@ -1122,109 +1008,36 @@
   });
 
   // ============================================================
-  // TEST: predictFor / claimFor / reportResult
+  // SALDI SPONSOR / ORACLE
   // ============================================================
-  async function getSponsorContract() {
-    const { ethers } = window;
-    const key = document.getElementById("sponsor-key").value.trim();
-    if (!key) throw new Error("Inserisci la sponsor private key.");
-    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 42, { staticNetwork: true });
-    const wallet = new ethers.Wallet(key, provider);
-    return new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, wallet);
-  }
+  document.getElementById("btn-check-balances").addEventListener("click", async () => {
+    const resultEl = document.getElementById("balances-result");
+    resultEl.className = "result";
+    resultEl.textContent = "Reading from chain…";
 
-  async function getOracleContract() {
-    const { ethers } = window;
-    const key = document.getElementById("oracle-key").value.trim();
-    if (!key) throw new Error("Inserisci la oracle private key.");
-    const provider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 42, { staticNetwork: true });
-    const wallet = new ethers.Wallet(key, provider);
-    return new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, wallet);
-  }
-
-  document.getElementById("btn-predict-for").addEventListener("click", async () => {
-    const resultEl = document.getElementById("test-result-output");
-    try {
-      // Carica ethers se non ancora caricato
-      if (!window.ethers) {
-        const { ethers } = await import("https://cdn.jsdelivr.net/npm/ethers@6.13.4/+esm");
-        window.ethers = ethers;
-      }
-      const matchId = document.getElementById("test-match-id").value;
-      const predictor = document.getElementById("test-predictor").value.trim();
-      const result = document.getElementById("test-result").value;
-
-      if (!matchId || !predictor) throw new Error("Compila matchId e predictor address.");
-
-      const c = await getSponsorContract();
-      resultEl.className = "result";
-      resultEl.textContent = "Sending predictFor()…";
-
-      const tx = await c.predictFor(matchId, result, predictor, { gasLimit: 300000 });
-      await tx.wait();
-
-      resultEl.textContent = `✅ predictFor() OK\nTx: ${tx.hash}`;
-      resultEl.className = "result ok";
-    } catch (err) {
-      resultEl.textContent = "❌ " + err.message;
-      resultEl.className = "result err";
-    }
-  });
-
-  document.getElementById("btn-report-result").addEventListener("click", async () => {
-    const resultEl = document.getElementById("test-result-output");
     try {
       if (!window.ethers) {
         const { ethers } = await import("https://cdn.jsdelivr.net/npm/ethers@6.13.4/+esm");
         window.ethers = ethers;
       }
-      const matchId = document.getElementById("test-match-id").value;
-      const result = document.getElementById("actual-result").value;
-
-      if (!matchId) throw new Error("Inserisci il matchId.");
-
-      const c = await getOracleContract();
-      resultEl.className = "result";
-      resultEl.textContent = "Sending reportResult()…";
-
-      const tx = await c.reportResult(matchId, result, { gasLimit: 200000 });
-      await tx.wait();
-
-      resultEl.textContent = `✅ reportResult() OK\nTx: ${tx.hash}`;
-      resultEl.className = "result ok";
-    } catch (err) {
-      resultEl.textContent = "❌ " + err.message;
-      resultEl.className = "result err";
-    }
-  });
-
-  document.getElementById("btn-claim-for").addEventListener("click", async () => {
-    const resultEl = document.getElementById("test-result-output");
-    try {
-      if (!window.ethers) {
-        const { ethers } = await import("https://cdn.jsdelivr.net/npm/ethers@6.13.4/+esm");
-        window.ethers = ethers;
-      }
-      const matchId = document.getElementById("test-match-id").value;
-      const winner = document.getElementById("test-predictor").value.trim();
-
-      if (!matchId || !winner) throw new Error("Compila matchId e winner address.");
-
-      const c = await getSponsorContract();
-      resultEl.className = "result";
-      resultEl.textContent = "Sending claimFor()…";
-
-      const tx = await c.claimFor(matchId, winner, { gasLimit: 1000000 });
-      const receipt = await tx.wait();
-
       const { ethers } = window;
-      const iface = new ethers.Interface(CONTRACT_ABI);
-      const event = receipt.logs
-        .map(log => { try { return iface.parseLog(log); } catch { return null; } })
-        .find(e => e?.name === "PrizeClaimed");
+      const roProvider = new ethers.JsonRpcProvider(CONFIG.RPC_URL, 42, { staticNetwork: true });
+      const ro = new ethers.Contract(CONFIG.CONTRACT_ADDRESS, CONTRACT_ABI, roProvider);
 
-      const tokenId = event ? event.args.tokenId : "?";
-      resultEl.textContent = `✅ claimFor() OK\nTokenId: ${tokenId}\nTx: ${tx.hash}`;
+      const [sponsorAddr, oracleAddr] = await Promise.all([ro.sponsor(), ro.oracle()]);
+      const [sponsorBal, oracleBal] = await Promise.all([
+        roProvider.getBalance(sponsorAddr),
+        roProvider.getBalance(oracleAddr)
+      ]);
+
+      const fmt = (addr, bal) => {
+        const lyx = Number(ethers.formatEther(bal));
+        const warn = lyx < 1 ? ` ⚠️ Saldo basso — valuta di rifornirlo` : "";
+        return `${addr}\n  ${lyx} LYX${warn}`;
+      };
+
+      resultEl.textContent =
+        `SPONSOR\n${fmt(sponsorAddr, sponsorBal)}\n\nORACLE\n${fmt(oracleAddr, oracleBal)}`;
       resultEl.className = "result ok";
     } catch (err) {
       resultEl.textContent = "❌ " + err.message;
