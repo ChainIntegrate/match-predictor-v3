@@ -364,6 +364,7 @@
   };
 
   const CONTRACT_ABI = [
+    "event PredictionMade(uint256 indexed matchId, address indexed predictor, uint8 predictedResult)",
     "function createMatchBatch(string[] teamHomes, string[] teamAways, uint256[] predictionDeadlines) external returns (uint256[])",
     "function setData(bytes32 dataKey, bytes dataValue) external",
     "function getDataForTokenId(bytes32 tokenId, bytes32 dataKey) external view returns (bytes)",
@@ -720,6 +721,28 @@
     return document.getElementById("backend-url").value.replace(/\/matches-data\/?$/, "/admin/set-user-limits");
   }
 
+  // Un'unica interrogazione per TUTTI i pronostici mai fatti (nessun filtro
+  // predictor), raggruppati poi lato client per indirizzo e per competizione
+  // (letta da matchesData, non dal contratto — la lega non è dato on-chain).
+  // Costa uguale con 5 utenti o con 500: una sola chiamata, non una a testa.
+  async function loadPredictionCounts() {
+    const events = await readContract.queryFilter(readContract.filters.PredictionMade());
+    const counts = {}; // address minuscolo -> { total, byCompetition: {} }
+
+    events.forEach(e => {
+      const addr = e.args.predictor.toLowerCase();
+      const matchId = Number(e.args.matchId);
+      const extra = matchesData.matches.find(m => m.contractMatchId === matchId);
+      const competition = extra?.competition || "WC";
+
+      if (!counts[addr]) counts[addr] = { total: 0, byCompetition: {} };
+      counts[addr].total++;
+      counts[addr].byCompetition[competition] = (counts[addr].byCompetition[competition] || 0) + 1;
+    });
+
+    return counts;
+  }
+
   document.getElementById("btn-load-users").addEventListener("click", async () => {
     if (!signer) { alert("Connetti prima la UP."); return; }
 
@@ -742,8 +765,23 @@
       const payload = await res.json();
       if (!payload.success) throw new Error(payload.error);
 
+      // Un'unica chiamata per i pronostici di tutti, non una per utente
+      resultEl.textContent = "Reading predictions from chain…";
+      let predictionCounts = {};
+      try {
+        predictionCounts = await loadPredictionCounts();
+      } catch (err) {
+        console.error("Errore lettura pronostici:", err.message);
+      }
+
       const rows = payload.users.map(u => {
         const date = new Date(u.created_at * 1000).toLocaleString("it-IT");
+        const stats = predictionCounts[u.address.toLowerCase()];
+        const predictionsSummary = stats
+          ? `${stats.total} totali` + (Object.keys(stats.byCompetition).length
+              ? ` (${Object.entries(stats.byCompetition).map(([c, n]) => `${c}: ${n}`).join(", ")})`
+              : "")
+          : "0";
         return `
           <tr style="border-bottom:1px solid #333;" data-email="${u.email}">
             <td data-label="Utente" style="padding:6px; vertical-align:top;">
@@ -751,6 +789,9 @@
               <div style="font-size:11px; opacity:0.6;">${u.address}${u.is_up ? " (UP propria)" : " (EOA generata)"}</div>
               ${u.display_name ? `<div style="font-size:11px; opacity:0.6;">${u.display_name}</div>` : ""}
               <div style="font-size:11px; opacity:0.6;">iscritto: ${date}</div>
+            </td>
+            <td data-label="Pronostici" style="padding:6px; vertical-align:top; font-size:11px;">
+              ${predictionsSummary}
             </td>
             <td data-label="Max gruppi creati" style="padding:6px; vertical-align:top;">
               <input type="number" min="0" class="limit-groups-created" value="${u.max_groups_created ?? ""}" placeholder="3 (default)" style="width:100px;">
@@ -774,6 +815,7 @@
           <thead>
           <tr style="text-align:left; border-bottom:1px solid #555;">
             <th style="padding:6px;">Utente</th>
+            <th style="padding:6px;">Pronostici</th>
             <th style="padding:6px;">Max gruppi creati</th>
             <th style="padding:6px;">Max gruppi partecipati</th>
             <th style="padding:6px;">Max competizioni</th>
