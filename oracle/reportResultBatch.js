@@ -95,6 +95,26 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Ritenta una chiamata RPC un paio di volte prima di arrendersi. Scoperta
+// empirica: chiamate identiche, testate isolatamente, funzionano sempre —
+// ma nel ciclo reale una piccola percentuale fallisce in modo casuale e
+// transitorio (partite diverse falliscono a ogni giro, mai le stesse),
+// segno di rumore di rete/connessione, non di un blocco vero. Un rapido
+// nuovo tentativo quasi sempre basta.
+async function withRetry(fn, label, attempts = 3, delayMs = 800) {
+  let lastErr;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      console.error(`  -> Tentativo ${i}/${attempts} fallito per ${label}: ${err.message}`);
+      if (i < attempts) await sleep(delayMs);
+    }
+  }
+  throw lastErr;
+}
+
 function loadMatchIdMapping() {
   if (!fs.existsSync(MATCHES_DATA_PATH)) {
     console.error(`Errore: ${MATCHES_DATA_PATH} non trovato. Salva almeno una volta i dati dal pannello admin.`);
@@ -190,49 +210,55 @@ async function main() {
   const oracleWallet = new ethers.Wallet(ORACLE_PRIVATE_KEY, provider);
   const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, oracleWallet);
 
-  const nextMatchId = await contract.nextMatchId();
+  const nextMatchId = await withRetry(() => contract.nextMatchId(), "nextMatchId()");
   console.log(`Totale match sul contratto: ${nextMatchId} (id 0 a ${Number(nextMatchId) - 1})`);
 
   let isFirstApiCall = true;
 
   for (let matchId = 0; matchId < Number(nextMatchId); matchId++) {
-    const onChainMatch = await contract.matches(matchId);
-
-    if (!onChainMatch.exists) {
-      continue;
-    }
-
-    if (onChainMatch.resolved) {
-      // Già risolta: nessuna chiamata a football-data.org necessaria, ma
-      // controlliamo comunque eventuali premi rimasti in sospeso.
-      console.log(`Match #${matchId} (${onChainMatch.teamHome} vs ${onChainMatch.teamAway}): già risolto, controllo premi in sospeso.`);
-      await assignPrizes(contract, matchId, onChainMatch.actualResult);
-      continue;
-    }
-
-    const footballDataId = matchIdMapping[String(matchId)];
-    if (!footballDataId) {
-      console.log(`Match #${matchId} (${onChainMatch.teamHome} vs ${onChainMatch.teamAway}): nessun mapping football-data.org configurato, salto.`);
-      continue;
-    }
-
-    const nowSec = Math.floor(Date.now() / 1000);
-    if (nowSec < Number(onChainMatch.predictionDeadline)) {
-      // La partita non è nemmeno iniziata: nessun risultato può esistere,
-      // quindi non ha senso interrogare football-data.org. Fondamentale su
-      // scala campionato (48+ partite mappate con settimane di anticipo).
-      console.log(`Match #${matchId} (${onChainMatch.teamHome} vs ${onChainMatch.teamAway}): deadline non ancora raggiunta, salto (nessuna chiamata API).`);
-      continue;
-    }
-
-    if (!isFirstApiCall) {
-      await sleep(DELAY_BETWEEN_CALLS_MS);
-    }
-    isFirstApiCall = false;
-
-    console.log(`Match #${matchId} (${onChainMatch.teamHome} vs ${onChainMatch.teamAway}): controllo football-data.org #${footballDataId}...`);
-
     try {
+      // Piccola pausa prima di ogni lettura (tranne la primissima) — non ha
+      // risolto da sola i fallimenti intermittenti (verificato empiricamente),
+      // ma resta comunque prudente tenerla. Il retry qui sotto è quello che
+      // fa davvero la differenza.
+      if (matchId > 0) await sleep(150);
+
+      const onChainMatch = await withRetry(() => contract.matches(matchId), `matches(${matchId})`);
+
+      if (!onChainMatch.exists) {
+        continue;
+      }
+
+      if (onChainMatch.resolved) {
+        // Già risolta: nessuna chiamata a football-data.org necessaria, ma
+        // controlliamo comunque eventuali premi rimasti in sospeso.
+        console.log(`Match #${matchId} (${onChainMatch.teamHome} vs ${onChainMatch.teamAway}): già risolto, controllo premi in sospeso.`);
+        await assignPrizes(contract, matchId, onChainMatch.actualResult);
+        continue;
+      }
+
+      const footballDataId = matchIdMapping[String(matchId)];
+      if (!footballDataId) {
+        console.log(`Match #${matchId} (${onChainMatch.teamHome} vs ${onChainMatch.teamAway}): nessun mapping football-data.org configurato, salto.`);
+        continue;
+      }
+
+      const nowSec = Math.floor(Date.now() / 1000);
+      if (nowSec < Number(onChainMatch.predictionDeadline)) {
+        // La partita non è nemmeno iniziata: nessun risultato può esistere,
+        // quindi non ha senso interrogare football-data.org. Fondamentale su
+        // scala campionato (48+ partite mappate con settimane di anticipo).
+        console.log(`Match #${matchId} (${onChainMatch.teamHome} vs ${onChainMatch.teamAway}): deadline non ancora raggiunta, salto (nessuna chiamata API).`);
+        continue;
+      }
+
+      if (!isFirstApiCall) {
+        await sleep(DELAY_BETWEEN_CALLS_MS);
+      }
+      isFirstApiCall = false;
+
+      console.log(`Match #${matchId} (${onChainMatch.teamHome} vs ${onChainMatch.teamAway}): controllo football-data.org #${footballDataId}...`);
+
       const matchInfo = await fetchMatchResult(footballDataId);
 
       if (!matchInfo.finished) {
@@ -250,6 +276,8 @@ async function main() {
 
       await assignPrizes(contract, matchId, matchInfo.result);
     } catch (err) {
+      // Un fallimento qui (dopo aver esaurito i tentativi di retry) blocca
+      // SOLO questa partita — il ciclo prosegue con le successive.
       console.error(`  -> Errore per match #${matchId}: ${err.message}`);
     }
   }
