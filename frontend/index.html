@@ -962,7 +962,8 @@ const CONFIG = {
   API_BASE: "https://playmatchpredictor.chainintegrate.it/api",
   RPC_URL: "https://42.rpc.thirdweb.com/5a1ce665bbd8bf85b8180be26981ade4",
   CONTRACT_ADDRESS: "0xf3D944E7061E896352C9082fe7866Ddbd436398d",
-  TOKEN_STORY_KEY: "0xc345e2857e55742bc896212b499925391cc94c97152776066ccf64e4df74ee09"
+  TOKEN_STORY_KEY: "0xc345e2857e55742bc896212b499925391cc94c97152776066ccf64e4df74ee09",
+  DEPLOY_BLOCK: 8023892
 };
 
 const CONTRACT_ABI = [
@@ -1287,6 +1288,20 @@ async function initEthers() {
 // — e conta le chiamate RPC raggruppate DENTRO una richiesta HTTP come
 // singole richieste separate, non una sola. 8 lascia un margine di sicurezza
 // anche con più utenti contemporaneamente.
+// Ritenta una singola chiamata RPC una volta prima di arrendersi — scoperta
+// empirica sull'oracolo: una piccola percentuale di chiamate fallisce in modo
+// casuale e transitorio (stessa chiamata, ripetuta, funziona quasi sempre).
+// Pausa breve apposta: qui l'utente sta aspettando dal vivo, non un cron in
+// background — un solo tentativo in più, non tre.
+async function withRetry(fn) {
+  try {
+    return await fn();
+  } catch {
+    await new Promise(r => setTimeout(r, 250));
+    return await fn();
+  }
+}
+
 async function mapWithConcurrencyLimit(items, limit, fn) {
   const results = new Array(items.length);
   let cursor = 0;
@@ -1306,13 +1321,13 @@ async function loadMatchesFromChain(idsToFetch = null) {
   if (idsToFetch) {
     ids = idsToFetch;
   } else {
-    const nextId = await readContract.nextMatchId();
+    const nextId = await withRetry(() => readContract.nextMatchId());
     ids = Array.from({ length: Number(nextId) }, (_, i) => i);
   }
 
   const results = await mapWithConcurrencyLimit(ids, 8, async (i) => {
     try {
-      const m = await readContract.getMatch(i);
+      const m = await withRetry(() => readContract.getMatch(i));
       return { id: i, teamHome: m.teamHome, teamAway: m.teamAway, predictionDeadline: m.predictionDeadline, resolved: m.resolved, actualResult: m.actualResult, exists: m.exists };
     } catch { return null; }
   });
@@ -1334,7 +1349,7 @@ async function fetchAllPredictionEvents(matchIds) {
     // Filtro con un ARRAY di matchId = "OR" tra questi valori lato nodo RPC,
     // una singola vera interrogazione eth_getLogs invece di N separate.
     const filter = readContract.filters.PredictionMade(uncached);
-    const events = await readContract.queryFilter(filter, 0, "latest");
+    const events = await withRetry(() => readContract.queryFilter(filter, CONFIG.DEPLOY_BLOCK, "latest"));
     uncached.forEach(id => predictionEventsCache.set(id, []));
     events.forEach(e => {
       const matchId = Number(e.args.matchId);
@@ -1353,7 +1368,7 @@ async function fetchPredictionEvents(matchId) {
   await initEthers();
   try {
     const filter = readContract.filters.PredictionMade(matchId);
-    const events = await readContract.queryFilter(filter, 0, "latest");
+    const events = await withRetry(() => readContract.queryFilter(filter, CONFIG.DEPLOY_BLOCK, "latest"));
     const result = events.map(e => ({ predictor: e.args.predictor, result: Number(e.args.predictedResult) }));
     predictionEventsCache.set(matchId, result);
     return result;
@@ -1364,7 +1379,7 @@ async function fetchClaimEvents(userAddress) {
   await initEthers();
   try {
     const filter = readContract.filters.PrizeClaimed(null, userAddress);
-    const events = await readContract.queryFilter(filter, 0, "latest");
+    const events = await withRetry(() => readContract.queryFilter(filter, CONFIG.DEPLOY_BLOCK, "latest"));
     return events.map(e => ({ matchId: Number(e.args.matchId), tokenId: e.args.tokenId }));
   } catch { return []; }
 }
@@ -1372,7 +1387,7 @@ async function fetchClaimEvents(userAddress) {
 async function readTokenStory(tokenId) {
   await initEthers();
   try {
-    const raw = await readContract.getDataForTokenId(tokenId, CONFIG.TOKEN_STORY_KEY);
+    const raw = await withRetry(() => readContract.getDataForTokenId(tokenId, CONFIG.TOKEN_STORY_KEY));
     return ethersLib.toUtf8String(raw);
   } catch { return null; }
 }
@@ -1597,11 +1612,11 @@ async function renderMatches(filter = "upcoming") {
     // i "giri" di andata e ritorno necessari.
     const rawMatches = await mapWithConcurrencyLimit(idsToFetch, 8, async (i) => {
       try {
-        const raw = await readContract.getMatch(i);
+        const raw = await withRetry(() => readContract.getMatch(i));
         if (isLoggedIn()) {
           try {
-            userPreds[i] = Number(await readContract.predictions(i, currentUser.address));
-            userClaims[i] = await readContract.claimed(i, currentUser.address);
+            userPreds[i] = Number(await withRetry(() => readContract.predictions(i, currentUser.address)));
+            userClaims[i] = await withRetry(() => readContract.claimed(i, currentUser.address));
           } catch {}
         }
         return { id: i, teamHome: raw.teamHome, teamAway: raw.teamAway,
@@ -1809,7 +1824,7 @@ async function renderMyPredictions() {
     .map(m => m.contractMatchId);
 
   const rawItems = await mapWithConcurrencyLimit(idsToCheck, 8, async (i) => {
-    const pred = Number(await readContract.predictions(i, currentUser.address));
+    const pred = Number(await withRetry(() => readContract.predictions(i, currentUser.address)));
     if (pred === 0) return null;
     const [raw, claimed] = await Promise.all([
       readContract.getMatch(i),
@@ -1887,7 +1902,7 @@ async function renderLeaderboard(addresses, containerId, userAddr, sortMode = "w
   await fetchAllPredictionEvents(idsToCheck);
 
   await mapWithConcurrencyLimit(idsToCheck, 8, async (i) => {
-    const m = await readContract.getMatch(i);
+    const m = await withRetry(() => readContract.getMatch(i));
     if (!m.resolved) return;
     const actual = Number(m.actualResult);
     const events = await fetchPredictionEvents(i);
@@ -2046,7 +2061,7 @@ async function computeGroupStandings(members, matchIds) {
   // ognuna tutti i membri uno alla volta (era un doppio ciclo annidato).
   const matches = await mapWithConcurrencyLimit(matchIds, 8, async (i) => {
     try {
-      const m = await readContract.getMatch(i);
+      const m = await withRetry(() => readContract.getMatch(i));
       return { id: i, m };
     } catch { return null; }
   });
@@ -2057,7 +2072,7 @@ async function computeGroupStandings(members, matchIds) {
 
   await mapWithConcurrencyLimit(resolvedPairs, 8, async ({ id, actual, member }) => {
     try {
-      const pred = Number(await readContract.predictions(id, member.address));
+      const pred = Number(await withRetry(() => readContract.predictions(id, member.address)));
       if (pred === actual) {
         const key = member.address.toLowerCase();
         winsMap.set(key, (winsMap.get(key) || 0) + 1);
@@ -2077,7 +2092,7 @@ async function computeGroupStandings(members, matchIds) {
 // tutte le partite esistenti meno quelle escluse a mano.
 async function liveGroupMatchIds(excludedIds) {
   await initEthers();
-  const total = Number(await readContract.nextMatchId());
+  const total = Number(await withRetry(() => readContract.nextMatchId()));
   const ids = [];
   for (let i = 0; i < total; i++) {
     if (!excludedIds.has(i)) ids.push(i);
@@ -2149,7 +2164,7 @@ async function renderGroupMatches(members, filter) {
   // Carica tutte le partite on-chain (in parallelo, non una alla volta)
   const rawMatches = await mapWithConcurrencyLimit(matchIdsToShow, 8, async (i) => {
     try {
-      const m = await readContract.getMatch(i);
+      const m = await withRetry(() => readContract.getMatch(i));
       return { id: i, teamHome: m.teamHome, teamAway: m.teamAway,
         predictionDeadline: m.predictionDeadline, resolved: m.resolved,
         actualResult: m.actualResult, exists: m.exists };
@@ -2181,7 +2196,7 @@ async function renderGroupMatches(members, filter) {
   const memberMatchPairs = members.flatMap(member => filtered.map(m => ({ member, m })));
   await mapWithConcurrencyLimit(memberMatchPairs, 8, async ({ member, m }) => {
     try {
-      const pred = Number(await readContract.predictions(m.id, member.address));
+      const pred = Number(await withRetry(() => readContract.predictions(m.id, member.address)));
       memberPreds[member.address.toLowerCase()][m.id] = pred;
     } catch {}
   });
@@ -2191,7 +2206,7 @@ async function renderGroupMatches(members, filter) {
   const myClaims = {};
   if (currentUser) {
     await mapWithConcurrencyLimit(filtered, 8, async (m) => {
-      try { myClaims[m.id] = await readContract.claimed(m.id, currentUser.address); } catch {}
+      try { myClaims[m.id] = await withRetry(() => readContract.claimed(m.id, currentUser.address)); } catch {}
     });
   }
 
@@ -2404,7 +2419,7 @@ function updateFloatingConfirm() {
 async function refreshSingleMatchCard(matchId) {
   await initEthers();
   try {
-    const raw = await readContract.getMatch(matchId);
+    const raw = await withRetry(() => readContract.getMatch(matchId));
     const m = { id: matchId, teamHome: raw.teamHome, teamAway: raw.teamAway,
       predictionDeadline: raw.predictionDeadline, resolved: raw.resolved,
       actualResult: raw.actualResult, exists: raw.exists };
@@ -2412,8 +2427,8 @@ async function refreshSingleMatchCard(matchId) {
     let myPred = 0, claimed = false;
     if (currentUser) {
       try {
-        myPred = Number(await readContract.predictions(matchId, currentUser.address));
-        claimed = await readContract.claimed(matchId, currentUser.address);
+        myPred = Number(await withRetry(() => readContract.predictions(matchId, currentUser.address)));
+        claimed = await withRetry(() => readContract.claimed(matchId, currentUser.address));
       } catch {}
     }
 

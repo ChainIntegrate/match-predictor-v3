@@ -360,7 +360,8 @@
     RPC_URL: "https://42.rpc.thirdweb.com/5a1ce665bbd8bf85b8180be26981ade4",
     CHAIN_ID_HEX: "0x1069",
     IPFS_GATEWAY: "https://api.universalprofile.cloud/ipfs/",
-    FOOTBALL_DATA_PROXY: "https://playmatchpredictor.chainintegrate.it/api/upcoming-matches"
+    FOOTBALL_DATA_PROXY: "https://playmatchpredictor.chainintegrate.it/api/upcoming-matches",
+    DEPLOY_BLOCK: 8023892
   };
 
   const CONTRACT_ABI = [
@@ -554,7 +555,9 @@
       const teamAways = selected.map(m => m.teamAway);
       const deadlines = selected.map(m => Math.floor(new Date(m.kickoff).getTime() / 1000));
 
-      const tx = await contract.createMatchBatch(teamHomes, teamAways, deadlines);
+      const tx = await contract.createMatchBatch(teamHomes, teamAways, deadlines, {
+        gasLimit: 100000 + teamHomes.length * 150000
+      });
       resultEl.textContent = "Transaction sent, waiting for confirmation…";
       const receipt = await tx.wait();
 
@@ -687,7 +690,7 @@
       }], lsp4Schema);
 
       btn.textContent = "Confirm in your UP extension…";
-      const tx = await contract.setData(encoded.keys[0], encoded.values[0]);
+      const tx = await contract.setData(encoded.keys[0], encoded.values[0], { gasLimit: 200000 });
       resultEl.textContent = "Waiting for confirmation…";
       await tx.wait();
 
@@ -726,7 +729,7 @@
   // (letta da matchesData, non dal contratto — la lega non è dato on-chain).
   // Costa uguale con 5 utenti o con 500: una sola chiamata, non una a testa.
   async function loadPredictionCounts() {
-    const events = await readContract.queryFilter(readContract.filters.PredictionMade());
+    const events = await readContract.queryFilter(readContract.filters.PredictionMade(), CONFIG.DEPLOY_BLOCK, "latest");
     const counts = {}; // address minuscolo -> { total, byCompetition: {} }
 
     events.forEach(e => {
@@ -886,7 +889,7 @@
     listEl.innerHTML = "";
 
     try {
-      const events = await readContract.queryFilter(readContract.filters.PrizeClaimed());
+      const events = await readContract.queryFilter(readContract.filters.PrizeClaimed(), CONFIG.DEPLOY_BLOCK, "latest");
       const matchCache = {};
       pendingTokens = [];
 
@@ -1012,7 +1015,7 @@
         const json = {
           LSP4Metadata: {
             name: `MatchPredictor Winner — ${t.teamHome} vs ${t.teamAway}`,
-            description: `Premio per il pronostico corretto su ${t.teamHome} vs ${t.teamAway} (${competitionName}).`,
+            description: `Prize for the correct prediction on ${t.teamHome} vs ${t.teamAway} (${competitionName}).\nPremio per il pronostico corretto su ${t.teamHome} vs ${t.teamAway} (${competitionName}).`,
             links: [{ title: "Play MatchPredictor", url: "https://playmatchpredictor.chainintegrate.it" }],
             icon: [{ width: imageWidth, height: imageHeight, url: `ipfs://${imageCid}`, verification: { method: "keccak256(bytes)", data: imageHash } }],
             images: [[{ width: imageWidth, height: imageHeight, url: `ipfs://${imageCid}`, verification: { method: "keccak256(bytes)", data: imageHash } }]],
@@ -1046,7 +1049,9 @@
       }
 
       resultEl.textContent = `Confirm in your UP extension… (${tokenIds.length} token in un'unica transazione)`;
-      const tx = await contract.setDataBatchForTokenIds(tokenIds, dataKeys, dataValues);
+      const tx = await contract.setDataBatchForTokenIds(tokenIds, dataKeys, dataValues, {
+        gasLimit: 150000 + tokenIds.length * 200000
+      });
       resultEl.textContent = "Waiting for confirmation…";
       await tx.wait();
 

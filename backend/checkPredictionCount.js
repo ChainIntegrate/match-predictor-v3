@@ -12,6 +12,7 @@ const { ethers } = require("ethers");
 
 const RPC_URL = process.env.LUKSO_RPC_URL;
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
+const DEPLOY_BLOCK = process.env.CONTRACT_DEPLOY_BLOCK ? Number(process.env.CONTRACT_DEPLOY_BLOCK) : 8023892;
 
 const ABI = [
   "event PredictionMade(uint256 indexed matchId, address indexed predictor, uint8 predictedResult)",
@@ -32,7 +33,7 @@ async function main() {
   console.log(`Partita #${matchId}: ${m.teamHome} vs ${m.teamAway}\n`);
 
   // Query FILTRATA per questo matchId (quello che fa davvero il sito)
-  const filtered = await contract.queryFilter(contract.filters.PredictionMade(matchId), 0, "latest");
+  const filtered = await contract.queryFilter(contract.filters.PredictionMade(matchId), DEPLOY_BLOCK, "latest");
   console.log(`Eventi restituiti dalla query filtrata per matchId=${matchId}: ${filtered.length}`);
 
   const wrongMatchIds = filtered.filter(e => Number(e.args.matchId) !== matchId);
@@ -45,7 +46,7 @@ async function main() {
 
   // Per confronto: query SENZA filtro (tutte le partite), per capire se il
   // numero "sbagliato" visto sul sito corrisponde al totale generale
-  const all = await contract.queryFilter(contract.filters.PredictionMade(), 0, "latest");
+  const all = await contract.queryFilter(contract.filters.PredictionMade(), DEPLOY_BLOCK, "latest");
   console.log(`\nPer confronto — eventi PredictionMade su TUTTE le partite: ${all.length}`);
 
   const predictorsForThisMatch = new Set(filtered.map(e => e.predictor ?? e.args.predictor));

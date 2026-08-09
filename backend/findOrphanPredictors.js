@@ -18,6 +18,7 @@ const Database = require("better-sqlite3");
 
 const RPC_URL = process.env.LUKSO_RPC_URL || "https://rpc.testnet.lukso.network";
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
+const DEPLOY_BLOCK = process.env.CONTRACT_DEPLOY_BLOCK ? Number(process.env.CONTRACT_DEPLOY_BLOCK) : 8023892;
 
 const CONTRACT_ABI = [
   "function nextMatchId() external view returns (uint256)",
@@ -34,7 +35,7 @@ async function main() {
   const provider = new ethers.JsonRpcProvider(RPC_URL, 42, { staticNetwork: true });
   const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
 
-  const events = await contract.queryFilter(contract.filters.PredictionMade(), 0, "latest");
+  const events = await contract.queryFilter(contract.filters.PredictionMade(), DEPLOY_BLOCK, "latest");
   console.log(`Eventi PredictionMade trovati on-chain: ${events.length}\n`);
 
   // Raggruppa per indirizzo predictor

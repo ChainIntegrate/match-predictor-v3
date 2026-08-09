@@ -40,7 +40,7 @@ const ORACLE_PRIVATE_KEY = process.env.ORACLE_PRIVATE_KEY;
 const FOOTBALL_DATA_API_KEY = process.env.FOOTBALL_DATA_API_KEY;
 // Blocco di deploy del contratto: limita il range di queryFilter per gli eventi
 // PredictionMade. Opzionale — se non impostato si parte da 0 (più lento ma corretto).
-const DEPLOY_BLOCK = process.env.CONTRACT_DEPLOY_BLOCK ? Number(process.env.CONTRACT_DEPLOY_BLOCK) : 0;
+const DEPLOY_BLOCK = process.env.CONTRACT_DEPLOY_BLOCK ? Number(process.env.CONTRACT_DEPLOY_BLOCK) : 8023892;
 
 const MATCHES_DATA_PATH = path.join(__dirname, "..", "backend", "matches-data.json");
 
