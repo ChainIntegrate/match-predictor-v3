@@ -17,6 +17,26 @@ const CONTRACT_ABI = [
 
 const Result = { HOME_WIN: 1, DRAW: 2, AWAY_WIN: 3 };
 
+// Ritenta l'attesa della conferma se il controllo stesso fallisce per un
+// intoppo di rete (visto oggi: thirdweb risponde male a eth_getTransactionReceipt
+// mentre la transazione, già inviata con successo, sta semplicemente aspettando
+// conferma). Sicuro da ripetere: non reinvia nulla, controlla solo lo stato di
+// una transazione già partita — a differenza di ripetere l'invio, che sarebbe
+// pericoloso.
+async function waitWithRetry(tx, attempts = 3, delayMs = 2000) {
+  let lastErr;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await tx.wait();
+    } catch (err) {
+      lastErr = err;
+      console.error(`Tentativo ${i}/${attempts} di conferma fallito per tx ${tx.hash}: ${err.message}`);
+      if (i < attempts) await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr;
+}
+
 function getSponsorContract() {
   const provider = new ethers.JsonRpcProvider(RPC_URL, 42, { staticNetwork: true });
   const wallet = new ethers.Wallet(SPONSOR_PRIVATE_KEY, provider);
@@ -29,7 +49,7 @@ async function predictFor(matchId, predictedResult, predictorAddress) {
   // gasLimit esplicito: alcuni proxy RPC (es. Blockscout) non stimano bene il
   // gas per le transazioni scritte — saltiamo eth_estimateGas del tutto.
   const tx = await contract.predictFor(matchId, predictedResult, predictorAddress, { gasLimit: 300000 });
-  const receipt = await tx.wait();
+  const receipt = await waitWithRetry(tx);
   return { txHash: tx.hash, blockNumber: receipt.blockNumber };
 }
 
@@ -39,7 +59,7 @@ async function predictBatchFor(matchIds, predictedResults, predictorAddress) {
   const contract = getSponsorContract();
   const gasLimit = 100000 + matchIds.length * 120000;
   const tx = await contract.predictBatchFor(matchIds, predictedResults, predictorAddress, { gasLimit });
-  const receipt = await tx.wait();
+  const receipt = await waitWithRetry(tx);
   return { txHash: tx.hash, blockNumber: receipt.blockNumber };
 }
 
@@ -50,7 +70,7 @@ async function claimFor(matchId, winnerAddress) {
   // Il mint LSP8 (con scrittura ERC725Y + notifica universalReceiver al
   // destinatario) è più pesante di una semplice scrittura: margine maggiore.
   const tx = await contract.claimFor(matchId, winnerAddress, { gasLimit: 1000000 });
-  const receipt = await tx.wait();
+  const receipt = await waitWithRetry(tx);
 
   const iface = new ethers.Interface(CONTRACT_ABI);
   const event = receipt.logs
@@ -90,7 +110,7 @@ async function claimForBatch(matchId, winnerAddresses, concurrency = 5) {
     const confirmed = await Promise.all(sent.map(async (s) => {
       if (s.error) return { winner: s.winner, error: s.error.message };
       try {
-        const receipt = await s.tx.wait();
+        const receipt = await waitWithRetry(s.tx);
         const event = receipt.logs
           .map(log => { try { return iface.parseLog(log); } catch { return null; } })
           .find(e => e?.name === "PrizeClaimed");
