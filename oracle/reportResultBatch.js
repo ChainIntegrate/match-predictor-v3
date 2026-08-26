@@ -206,7 +206,7 @@ async function main() {
   const matchIdMapping = loadMatchIdMapping();
   console.log(`Mapping caricato da matches-data.json: ${Object.keys(matchIdMapping).length} partite conosciute.`);
 
-  const provider = new ethers.JsonRpcProvider(RPC_URL, 42, { staticNetwork: true });
+  const provider = new ethers.JsonRpcProvider(RPC_URL, 42, { staticNetwork: true, batchMaxCount: 1 });
   const oracleWallet = new ethers.Wallet(ORACLE_PRIVATE_KEY, provider);
   const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, oracleWallet);
 

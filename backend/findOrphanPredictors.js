@@ -32,7 +32,7 @@ async function main() {
 
   console.log(`Utenti nel DB: ${dbUsers.length}\n`);
 
-  const provider = new ethers.JsonRpcProvider(RPC_URL, 42, { staticNetwork: true });
+  const provider = new ethers.JsonRpcProvider(RPC_URL, 42, { staticNetwork: true, batchMaxCount: 1 });
   const contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, provider);
 
   const events = await contract.queryFilter(contract.filters.PredictionMade(), DEPLOY_BLOCK, "latest");

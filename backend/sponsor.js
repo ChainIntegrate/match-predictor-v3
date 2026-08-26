@@ -38,7 +38,7 @@ async function waitWithRetry(tx, attempts = 3, delayMs = 2000) {
 }
 
 function getSponsorContract() {
-  const provider = new ethers.JsonRpcProvider(RPC_URL, 42, { staticNetwork: true });
+  const provider = new ethers.JsonRpcProvider(RPC_URL, 42, { staticNetwork: true, batchMaxCount: 1 });
   const wallet = new ethers.Wallet(SPONSOR_PRIVATE_KEY, provider);
   return new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, wallet);
 }

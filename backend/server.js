@@ -68,7 +68,7 @@ async function withRetry(fn) {
 }
 
 async function verifyOwnerSignature(message, signature) {
-  const provider = new ethers.JsonRpcProvider(process.env.LUKSO_RPC_URL, 42, { staticNetwork: true });
+  const provider = new ethers.JsonRpcProvider(process.env.LUKSO_RPC_URL, 42, { staticNetwork: true, batchMaxCount: 1 });
   const upAbi = ["function isValidSignature(bytes32 hash, bytes memory signature) external view returns (bytes4)"];
   const up = new ethers.Contract(process.env.OWNER_UP_ADDRESS, upAbi, provider);
   const messageHash = ethers.hashMessage(message);

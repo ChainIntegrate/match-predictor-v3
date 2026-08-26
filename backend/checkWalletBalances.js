@@ -12,7 +12,7 @@ const { ethers } = require("ethers");
 const RPC_URL = process.env.LUKSO_RPC_URL || "https://rpc.testnet.lukso.network";
 
 async function main() {
-  const provider = new ethers.JsonRpcProvider(RPC_URL, 42, { staticNetwork: true });
+  const provider = new ethers.JsonRpcProvider(RPC_URL, 42, { staticNetwork: true, batchMaxCount: 1 });
 
   const wallets = {
     SPONSOR: process.env.SPONSOR_PRIVATE_KEY,
