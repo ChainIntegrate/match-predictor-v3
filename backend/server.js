@@ -54,15 +54,35 @@ function requireCompetitionJoined(userId, contractMatchId) {
 }
 
 // Verifica firma owner (ERC-1271) per endpoint admin sensibili
+// Ritenta una chiamata RPC una volta prima di arrendersi — stesso principio
+// già validato oggi sull'oracolo: una minoranza di chiamate fallisce in modo
+// casuale e transitorio (probabile instabilità infrastrutturale lato RPC),
+// e un secondo tentativo quasi sempre basta.
+async function withRetry(fn) {
+  try {
+    return await fn();
+  } catch {
+    await new Promise((r) => setTimeout(r, 300));
+    return await fn();
+  }
+}
+
 async function verifyOwnerSignature(message, signature) {
   const provider = new ethers.JsonRpcProvider(process.env.LUKSO_RPC_URL, 42, { staticNetwork: true });
   const upAbi = ["function isValidSignature(bytes32 hash, bytes memory signature) external view returns (bytes4)"];
   const up = new ethers.Contract(process.env.OWNER_UP_ADDRESS, upAbi, provider);
   const messageHash = ethers.hashMessage(message);
   try {
-    const result = await up.isValidSignature(messageHash, signature);
+    const result = await withRetry(() => up.isValidSignature(messageHash, signature));
     return result.toLowerCase() === "0x1626ba7e";
-  } catch { return false; }
+  } catch (err) {
+    // Prima questo errore spariva nel nulla — "Firma non autorizzata" veniva
+    // mostrato indistintamente sia per una firma davvero sbagliata sia per un
+    // guasto RPC temporaneo nel verificarla, rendendo impossibile capire
+    // quale dei due fosse successo davvero. Ora almeno resta traccia in log.
+    console.error("Errore durante la verifica della firma owner (probabile intoppo RPC, non necessariamente firma invalida):", err.message);
+    return false;
+  }
 }
 
 // ── Health ────────────────────────────────────────────────────────────────
