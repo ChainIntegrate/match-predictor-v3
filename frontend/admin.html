@@ -179,12 +179,24 @@
 
   .match-item {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
     padding: 10px 12px;
     border-bottom: 1px solid var(--border);
     cursor: pointer;
     transition: background 0.1s;
+  }
+  .time-warning {
+    flex-basis: 100%;
+    margin-top: 4px;
+    padding: 8px 10px;
+    background: rgba(255, 77, 46, 0.12);
+    border: 1px solid rgba(255, 77, 46, 0.35);
+    border-radius: 8px;
+    color: #ff8a6a;
+    font-size: 12px;
+    line-height: 1.4;
   }
 
   .match-item:last-child { border-bottom: none; }
@@ -505,6 +517,18 @@
     matches.forEach((m, i) => {
       const div = document.createElement("div");
       div.className = "match-item";
+
+      // football-data.org, quando l'orario non è ancora stato confermato
+      // (tipico per partite programmate con largo anticipo), spesso riempie
+      // comunque il campo con 00:00 UTC invece di lasciarlo vuoto — un orario
+      // reale a mezzanotte esatta è raro, quindi è un segnale sufficientemente
+      // affidabile da segnalare prima di creare la partita, non dopo.
+      const kickoffDate = new Date(m.kickoff);
+      const timeUnconfirmed = kickoffDate.getUTCHours() === 0 && kickoffDate.getUTCMinutes() === 0;
+      const warningHtml = timeUnconfirmed
+        ? `<div class="time-warning">⚠️ Orario esattamente 00:00 — probabilmente non ancora confermato da football-data.org. Verifica prima di creare la partita: una volta scritta on-chain la deadline non è più modificabile.</div>`
+        : "";
+
       div.innerHTML = `
         <input type="checkbox" id="match-${i}" data-index="${i}" checked>
         <div class="teams">${m.teamHome} vs ${m.teamAway}</div>
@@ -512,6 +536,7 @@
           ${m.group}<br>
           ${new Date(m.kickoff).toLocaleString("en-GB", { day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit", timeZone:"UTC" })} UTC
         </div>
+        ${warningHtml}
       `;
       div.querySelector("input").addEventListener("change", updateSelectedCount);
       container.appendChild(div);
