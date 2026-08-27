@@ -26,6 +26,23 @@
     --gold: #F5C842;
   }
 
+  /* Tema chiaro — stesso "peso visivo" del tema scuro, invertito:
+     sfondo più chiaro possibile, testo più scuro possibile, gli accenti
+     (verde/rosso/oro) leggermente approfonditi per restare leggibili
+     su sfondo chiaro invece che brillare su sfondo scuro. */
+  [data-theme="light"] {
+    --bg: #F5F2E8;
+    --bg-mid: #EBE6D6;
+    --card: #FFFFFF;
+    --line: #D9D4C2;
+    --chalk: #16261D;
+    --chalk-dim: #5C6B60;
+    --green: #2F9E6E;
+    --green-dim: #6B9C82;
+    --red: #D8341A;
+    --gold: #B8860B;
+  }
+
   * { box-sizing: border-box; margin: 0; padding: 0; }
 
   body {
@@ -34,6 +51,7 @@
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     min-height: 100vh;
     font-size: 15px;
+    transition: background-color 0.2s, color 0.2s;
   }
 
   /* ── Header ── */
@@ -651,6 +669,7 @@
       </div>
     </div>
     <button id="lang-toggle-btn" class="btn-ghost btn-sm" style="margin-left:10px;" title="Change language / Cambia lingua"></button>
+    <button id="theme-toggle-btn" class="btn-ghost btn-sm" style="margin-left:6px;" title="Toggle light/dark theme"></button>
   </div>
   <div class="powered-by">
   <span data-i18n="powered_by">Powered by</span>
@@ -2334,6 +2353,26 @@ async function init() {
   langBtn.addEventListener("click", () => {
     localStorage.setItem("mp-lang", lang === "it" ? "en" : "it");
     location.reload();
+  });
+
+  // Tema chiaro/scuro: applicato subito (non serve ricaricare la pagina come
+  // per la lingua, basta cambiare un attributo — le variabili CSS fanno il
+  // resto). Preferenza salvata, default scuro (l'esperienza di sempre).
+  const themeBtn = document.getElementById("theme-toggle-btn");
+  function applyTheme(theme) {
+    if (theme === "light") {
+      document.documentElement.setAttribute("data-theme", "light");
+      themeBtn.textContent = "🌙";
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+      themeBtn.textContent = "☀️";
+    }
+  }
+  applyTheme(localStorage.getItem("mp-theme") || "dark");
+  themeBtn.addEventListener("click", () => {
+    const next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+    localStorage.setItem("mp-theme", next);
+    applyTheme(next);
   });
 
   // Magic link redirect
