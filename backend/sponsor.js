@@ -46,9 +46,16 @@ function getSponsorContract() {
 /// Registra un singolo pronostico per conto dell'utente.
 async function predictFor(matchId, predictedResult, predictorAddress) {
   const contract = getSponsorContract();
+  const wallet = contract.runner;
+  // Nonce esplicito da "pending", non dal default "latest" di ethers — senza
+  // questo, un secondo pronostico inviato prima che il primo si confermi
+  // riceverebbe lo stesso nonce del primo (ancora non "latest"), restando
+  // bloccato finché quello non si conferma. Stesso principio già in uso per
+  // claimForBatch, qui applicato al caso più comune: pronostici consecutivi.
+  const nonce = await wallet.getNonce("pending");
   // gasLimit esplicito: alcuni proxy RPC (es. Blockscout) non stimano bene il
   // gas per le transazioni scritte — saltiamo eth_estimateGas del tutto.
-  const tx = await contract.predictFor(matchId, predictedResult, predictorAddress, { gasLimit: 300000 });
+  const tx = await contract.predictFor(matchId, predictedResult, predictorAddress, { gasLimit: 300000, nonce });
   const receipt = await waitWithRetry(tx);
   return { txHash: tx.hash, blockNumber: receipt.blockNumber };
 }
@@ -57,8 +64,10 @@ async function predictFor(matchId, predictedResult, predictorAddress) {
 /// matchIds e predictedResults devono avere la stessa lunghezza.
 async function predictBatchFor(matchIds, predictedResults, predictorAddress) {
   const contract = getSponsorContract();
+  const wallet = contract.runner;
+  const nonce = await wallet.getNonce("pending");
   const gasLimit = 100000 + matchIds.length * 120000;
-  const tx = await contract.predictBatchFor(matchIds, predictedResults, predictorAddress, { gasLimit });
+  const tx = await contract.predictBatchFor(matchIds, predictedResults, predictorAddress, { gasLimit, nonce });
   const receipt = await waitWithRetry(tx);
   return { txHash: tx.hash, blockNumber: receipt.blockNumber };
 }
@@ -67,9 +76,11 @@ async function predictBatchFor(matchIds, predictedResults, predictorAddress) {
 /// Restituisce anche il tokenId dell'NFT mintato.
 async function claimFor(matchId, winnerAddress) {
   const contract = getSponsorContract();
+  const wallet = contract.runner;
+  const nonce = await wallet.getNonce("pending");
   // Il mint LSP8 (con scrittura ERC725Y + notifica universalReceiver al
   // destinatario) è più pesante di una semplice scrittura: margine maggiore.
-  const tx = await contract.claimFor(matchId, winnerAddress, { gasLimit: 1000000 });
+  const tx = await contract.claimFor(matchId, winnerAddress, { gasLimit: 1000000, nonce });
   const receipt = await waitWithRetry(tx);
 
   const iface = new ethers.Interface(CONTRACT_ABI);
