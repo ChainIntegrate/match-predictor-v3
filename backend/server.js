@@ -458,10 +458,13 @@ app.post("/api/admin/set-user-limits", async (req, res) => {
   res.json({ success: true });
 });
 
-// ── Admin: pin JSON su IPFS via Pinata (solo owner, firma ERC-1271) ───────
+// ── Admin: pin JSON su IPFS via nodo proprio (solo owner, firma ERC-1271) ─
 // POST /api/admin/pin-json  { message, signature, json, name }
-// Usato dal pannello admin per caricare i metadata LSP4 (collezione e per-token)
-// senza esporre la chiave Pinata nel browser.
+// Usato dal pannello admin per caricare i metadata LSP4 (collezione e per-token).
+// Migrato da Pinata al nodo Kubo self-hosted (ipfs.chainintegrate.it, VPS
+// dedicata) — stesso pattern già applicato a MyCarBook. Nessuna chiave API:
+// la sicurezza è la whitelist IP sul nodo stesso (porta 5001 raggiungibile
+// solo da questa VPS), non un segreto da custodire qui.
 app.post("/api/admin/pin-json", async (req, res) => {
   const { message, signature, json, name } = req.body;
   if (!message || !signature || !json || typeof json !== "object") {
@@ -478,31 +481,27 @@ app.post("/api/admin/pin-json", async (req, res) => {
   const isValid = await verifyOwnerSignature(message, signature);
   if (!isValid) return res.status(403).json({ success: false, error: "Firma non autorizzata" });
 
-  if (!process.env.PINATA_JWT) {
-    return res.status(500).json({ success: false, error: "PINATA_JWT non configurata sul server" });
+  if (!process.env.IPFS_API_URL) {
+    return res.status(500).json({ success: false, error: "IPFS_API_URL non configurata sul server" });
   }
 
   try {
-    const pinataRes = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
+    const jsonString = JSON.stringify(json);
+    const formData = new FormData();
+    formData.append("file", new Blob([jsonString], { type: "application/json" }), name || "metadata.json");
+
+    const ipfsRes = await fetch(`${process.env.IPFS_API_URL}/api/v0/add?pin=true&cid-version=1`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.PINATA_JWT}`
-      },
-      body: JSON.stringify({
-        pinataContent: json,
-        pinataMetadata: { name: name || "metadata.json" },
-        pinataOptions: { cidVersion: 1 }
-      })
+      body: formData
     });
 
-    if (!pinataRes.ok) {
-      const errText = await pinataRes.text();
-      return res.status(502).json({ success: false, error: `Pinata: ${pinataRes.status} ${errText}` });
+    if (!ipfsRes.ok) {
+      const errText = await ipfsRes.text();
+      return res.status(502).json({ success: false, error: `Nodo IPFS: ${ipfsRes.status} ${errText}` });
     }
 
-    const pinataData = await pinataRes.json();
-    res.json({ success: true, cid: pinataData.IpfsHash });
+    const ipfsData = await ipfsRes.json();
+    res.json({ success: true, cid: ipfsData.Hash });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
