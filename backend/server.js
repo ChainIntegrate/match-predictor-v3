@@ -554,8 +554,14 @@ app.get("/api/upcoming-matches", async (req, res) => {
   }
 
   try {
+    // Nessun filtro "status" nella richiesta: football-data.org usa più stati
+    // per una partita non ancora giocata (SCHEDULED, poi TIMED quando l'orario
+    // viene confermato più vicino alla data) — un filtro fisso su un solo
+    // stato escludeva silenziosamente le partite più vicine nel tempo, quelle
+    // paradossalmente più rilevanti da importare. L'intervallo di date scelto
+    // nel pannello basta da solo a escludere le partite già giocate.
     const response = await fetch(
-      `https://api.football-data.org/v4/competitions/${competition}/matches?dateFrom=${dateFrom}&dateTo=${dateTo}&status=SCHEDULED`,
+      `https://api.football-data.org/v4/competitions/${competition}/matches?dateFrom=${dateFrom}&dateTo=${dateTo}`,
       { headers: { "X-Auth-Token": process.env.FOOTBALL_DATA_API_KEY } }
     );
     if (!response.ok) return res.status(502).json({ success: false, error: `football-data.org: ${response.status}` });
@@ -563,6 +569,10 @@ app.get("/api/upcoming-matches", async (req, res) => {
     const data = await response.json();
     const known = (data.matches || [])
       .filter(m => m.homeTeam?.name && m.awayTeam?.name && m.homeTeam.name !== "TBD")
+      // Le già concluse/in corso/annullate non hanno senso da importare per
+      // pronosticare — questo filtro le esclude, mentre lascia passare sia
+      // SCHEDULED che TIMED (entrambe partite non ancora giocate).
+      .filter(m => !["FINISHED", "IN_PLAY", "PAUSED", "SUSPENDED", "CANCELLED", "AWARDED"].includes(m.status))
       .map(m => ({
         footballDataMatchId: m.id,
         teamHome: m.homeTeam.name,
