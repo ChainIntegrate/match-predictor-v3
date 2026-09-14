@@ -924,6 +924,30 @@ app.delete("/api/groups/:inviteCode", requireAuth, (req, res) => {
   res.json({ success: true, message: "Gruppo eliminato" });
 });
 
+// ── Proxy RPC verso il nodo LUKSO proprio ─────────────────────────────────
+// POST /api/rpc  { qualsiasi corpo JSON-RPC standard, anche in batch }
+// Il sito pubblico non conosce mai l'URL vero del nodo (con token
+// incorporato, da tenere riservato) — chiama sempre e solo questo endpoint,
+// che lo inoltra al nodo reale rimanendo lato server. Nessuna autenticazione
+// richiesta qui: i dati della blockchain sono comunque pubblici, quello che
+// si protegge è l'accesso/le risorse del nodo, non il contenuto.
+app.post("/api/rpc", async (req, res) => {
+  if (!process.env.LUKSO_RPC_URL) {
+    return res.status(500).json({ success: false, error: "LUKSO_RPC_URL non configurata sul server" });
+  }
+  try {
+    const rpcRes = await fetch(process.env.LUKSO_RPC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body)
+    });
+    const data = await rpcRes.json();
+    res.status(rpcRes.status).json(data);
+  } catch (err) {
+    res.status(502).json({ success: false, error: `Nodo RPC: ${err.message}` });
+  }
+});
+
 // ── Avvio ─────────────────────────────────────────────────────────────────
 app.listen(PORT, "127.0.0.1", () => {
   console.log("═══════════════════════════════════════");
