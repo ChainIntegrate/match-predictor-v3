@@ -21,7 +21,7 @@ app.use(cors({
   origin: process.env.FRONTEND_URL || "*",
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: "5mb" })); // default 100kb: troppo poco per il payload di /api/matches-data con centinaia di partite in cache
 
 // ── Helper ────────────────────────────────────────────────────────────────
 function readMatchesData() {
