@@ -104,6 +104,32 @@ function verifyMagicLink(token) {
   return { email: row.email, upAddress: row.up_address || null, marketingConsent: !!row.marketing_consent };
 }
 
+/// Notifica l'admin (indirizzo in ADMIN_NOTIFICATION_EMAIL) quando si registra
+/// un nuovo utente. Se la variabile non è configurata, non fa nulla — non deve
+/// mai bloccare o rallentare la registrazione dell'utente vero.
+async function sendNewUserNotification(email, upAddress) {
+  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL;
+  if (!adminEmail) return;
+
+  const accountType = upAddress ? `Universal Profile propria (${upAddress})` : "wallet generato automaticamente";
+
+  await transporter.sendMail({
+    from: `"MatchPredictor" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+    to: adminEmail,
+    subject: "Nuova registrazione su MatchPredictor",
+    html: `
+      <div style="font-family: sans-serif; max-width: 480px; margin: 0 auto;">
+        <h2>Nuovo utente registrato</h2>
+        <p><strong>Email:</strong> ${email}</p>
+        <p><strong>Account:</strong> ${accountType}</p>
+        <p style="color: #666; font-size: 12px;">
+          Notifica automatica — arriva solo alla prima registrazione con questa email, non ai login successivi.
+        </p>
+      </div>
+    `
+  });
+}
+
 /// Notifica via email gli utenti che hanno dato il consenso quando vengono
 /// aggiunte nuove partite (solo quelle davvero nuove, non l'intero elenco).
 async function sendNewMatchesNotification(newMatches) {
@@ -253,6 +279,7 @@ function requireAuth(req, res, next) {
 module.exports = {
   sendMagicLink,
   verifyMagicLink,
+  sendNewUserNotification,
   sendNewMatchesNotification,
   generateAccessToken,
   generateRefreshToken,

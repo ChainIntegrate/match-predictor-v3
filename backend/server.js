@@ -5,7 +5,7 @@ const cors = require("cors");
 const db = require("./db");
 const { generateUserWallet } = require("./keys");
 const { validateUPAddress } = require("./upValidator");
-const { sendMagicLink, verifyMagicLink, sendNewMatchesNotification, generateAccessToken, generateRefreshToken, rotateRefreshToken, requireAuth } = require("./auth");
+const { sendMagicLink, verifyMagicLink, sendNewUserNotification, sendNewMatchesNotification, generateAccessToken, generateRefreshToken, rotateRefreshToken, requireAuth } = require("./auth");
 const { predictFor, predictBatchFor, claimFor } = require("./sponsor");
 const { ethers } = require("ethers");
 const fs = require("fs");
@@ -147,6 +147,7 @@ app.get("/api/auth/verify", async (req, res) => {
 
   const { email, upAddress, marketingConsent } = verified;
   let user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+  const isNewRegistration = !user;
 
   if (!user) {
     if (upAddress) {
@@ -172,6 +173,14 @@ app.get("/api/auth/verify", async (req, res) => {
       ).run(email, address, encryptedPrivateKey, marketingConsent ? 1 : 0);
     }
     user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
+  }
+
+  // Non blocchiamo la risposta di login/registrazione in attesa dell'invio
+  // email — stessa logica già usata per la notifica di nuove partite.
+  if (isNewRegistration) {
+    sendNewUserNotification(user.email, upAddress).catch(err =>
+      console.error("Errore invio notifica nuova registrazione:", err.message)
+    );
   }
 
   const accessToken = generateAccessToken(user.id, user.email, user.address);
