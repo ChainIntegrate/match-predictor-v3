@@ -717,6 +717,9 @@
         <span data-i18n="how_it_works_banner">New here? See how it works in 1 minute →</span>
       </a>
 
+      <div class="status error" id="service-suspended-notice" style="display:none; margin-bottom: 16px;" data-i18n="service_suspended"></div>
+      <div class="status" id="registrations-closed-notice" style="display:none; margin-bottom: 16px;" data-i18n="registrations_closed"></div>
+
       <div class="toggle-bar" style="margin-bottom: 20px;">
         <button class="toggle-btn active" id="toggle-login" data-i18n="toggle_login">Login</button>
         <button class="toggle-btn" id="toggle-register" data-i18n="toggle_register">Register</button>
@@ -949,6 +952,17 @@
   </div>
 </div>
 
+<!-- Modale: servizio sperimentale sospeso -->
+<div id="modal-service-suspended" role="dialog" aria-modal="true" aria-labelledby="service-suspended-title" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); z-index:300; align-items:center; justify-content:center;">
+  <div style="background:var(--card); border:1px solid var(--line); border-radius:16px; padding:28px; max-width:420px; width:90%; margin:auto; text-align:center;">
+    <div style="font-size:40px; margin-bottom:12px;">🧪</div>
+    <h3 id="service-suspended-title" style="margin-bottom:10px;" data-i18n="suspended_modal_title">Experimental service paused</h3>
+    <p style="color:var(--chalk-dim); font-size:14px; line-height:1.5; margin-bottom:12px;" data-i18n="suspended_modal_body">MatchPredictor was an experimental project by ChainIntegrate to test on-chain predictions on LUKSO. The trial phase is over and the service is now paused.</p>
+    <p style="color:var(--chalk-dim); font-size:13px; line-height:1.5; margin-bottom:20px;" data-i18n="suspended_modal_body2">New registrations and predictions are closed. The NFTs you have already earned stay yours on the blockchain. Thank you for playing!</p>
+    <button class="btn-primary" id="btn-close-service-suspended" data-i18n="suspended_modal_ok">Got it</button>
+  </div>
+</div>
+
 <!-- Modale display name -->
 <div id="modal-display-name" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.7); z-index:100; align-items:center; justify-content:center;">
   <div style="background:var(--card); border:1px solid var(--line); border-radius:16px; padding:28px; max-width:400px; width:90%; margin:auto;">
@@ -1024,6 +1038,12 @@ const strings = {
     link_sent_sub: "We sent a magic link. Click it to log in. Valid for 15 minutes.",
     upcoming: "Upcoming", played: "Played",
     toggle_login: "Login", toggle_register: "Register",
+    registrations_closed: "Registrations are closed. Existing users can still sign in.",
+    service_suspended: "Experimental service paused: on-chain data and predictions are not available.",
+    suspended_modal_title: "Experimental service paused",
+    suspended_modal_body: "MatchPredictor was an experimental project by ChainIntegrate to test on-chain predictions on LUKSO. The trial phase is over and the service is now paused.",
+    suspended_modal_body2: "New registrations and predictions are closed. The NFTs you have already earned stay yours on the blockchain. Thank you for playing!",
+    suspended_modal_ok: "Got it",
     register_btn: "Create account",
     magic_link_explainer: "ℹ️ We'll send a secure sign-in link to this email — no password needed. Click it within 15 minutes to access your account.",
     back_to_competitions: "Back to competitions", choose_competition: "Choose a competition",
@@ -1090,6 +1110,12 @@ const strings = {
     marketing_toggle_label: "📧 Novità",
     send_link: "Invia link magico",
     toggle_login: "Accedi", toggle_register: "Registrati",
+    registrations_closed: "Le iscrizioni sono chiuse. Chi ha già un account può comunque accedere.",
+    service_suspended: "Servizio sperimentale sospeso: dati on-chain e pronostici non sono disponibili.",
+    suspended_modal_title: "Servizio sperimentale sospeso",
+    suspended_modal_body: "MatchPredictor è stato un progetto sperimentale di ChainIntegrate per testare i pronostici on-chain su LUKSO. La fase di prova si è conclusa e il servizio è ora sospeso.",
+    suspended_modal_body2: "Iscrizioni e pronostici sono chiusi. Gli NFT che hai già ottenuto restano tuoi sulla blockchain. Grazie per aver giocato!",
+    suspended_modal_ok: "Ho capito",
     register_btn: "Crea account",
     magic_link_explainer: "ℹ️ Ti mandiamo un link sicuro per accedere a questa email — nessuna password necessaria. Cliccalo entro 15 minuti per accedere al tuo account.",
     link_sent_title: "Controlla la tua email!",
@@ -1164,6 +1190,9 @@ let currentUser = JSON.parse(localStorage.getItem("mp_user") || "null");
 let matchesData = { matches: [] };
 let onChainMatches = [];
 let readContract = null;
+// Stato del servizio letto da /api/health (default "chiuso" finché non
+// risponde il server: meglio non fare chiamate RPC che farne di troppe).
+let serviceStatus = { registrationsOpen: false, rpcEnabled: false };
 let ethersLib = null;
 let currentGroupCode = null;
 const pendingPredictions = new Map(); // matchId → predictedResult (pending, non ancora inviati)
@@ -1288,6 +1317,7 @@ async function handleJoinRedirect() {
 // ETHERS / BLOCKCHAIN
 // ============================================================
 async function initEthers() {
+  if (!serviceStatus.rpcEnabled) throw new Error(t("service_suspended"));
   if (ethersLib && readContract) return;
   const { ethers } = await import("https://cdn.jsdelivr.net/npm/ethers@6.13.4/+esm");
   ethersLib = ethers;
@@ -2344,8 +2374,44 @@ function showTab(tabName) {
 // ============================================================
 // INIT
 // ============================================================
+// Popup "servizio sperimentale sospeso": mostrato una volta per sessione
+// del browser, così non ricompare a ogni ricarica della pagina.
+function showServiceSuspendedModal() {
+  try { if (sessionStorage.getItem("mp-suspended-seen")) return; } catch {}
+  const modal = document.getElementById("modal-service-suspended");
+  const close = () => {
+    modal.style.display = "none";
+    try { sessionStorage.setItem("mp-suspended-seen", "1"); } catch {}
+  };
+  document.getElementById("btn-close-service-suspended").onclick = close;
+  modal.onclick = (e) => { if (e.target === modal) close(); };
+  modal.style.display = "flex";
+}
+
+async function loadServiceStatus() {
+  try {
+    const res = await fetch(CONFIG.API_BASE + "/health");
+    const data = await res.json();
+    serviceStatus = {
+      registrationsOpen: data.registrationsOpen === true,
+      rpcEnabled: data.rpcEnabled === true
+    };
+  } catch { /* resta il default chiuso */ }
+
+  if (!serviceStatus.registrationsOpen) {
+    document.getElementById("toggle-register").style.display = "none";
+    document.getElementById("register-form").style.display = "none";
+    document.getElementById("registrations-closed-notice").style.display = "block";
+  }
+  if (!serviceStatus.rpcEnabled) {
+    document.getElementById("service-suspended-notice").style.display = "block";
+    showServiceSuspendedModal();
+  }
+}
+
 async function init() {
   applyI18n();
+  await loadServiceStatus();
 
   // Pulsante cambio lingua: mostra la lingua a cui passeresti cliccando
   const langBtn = document.getElementById("lang-toggle-btn");

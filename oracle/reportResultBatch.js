@@ -285,7 +285,13 @@ async function main() {
   console.log(`Ciclo completato: ${new Date().toISOString()}`);
 }
 
-if (acquireLock()) {
+const { rpcEnabled } = require("../backend/serviceStatus");
+
+if (!rpcEnabled()) {
+  // Servizio sospeso: il cron può restare installato, ma esce subito senza
+  // fare alcuna chiamata RPC né a football-data.org.
+  console.log(`[${new Date().toISOString()}] RPC_ENABLED non attivo: oracolo sospeso, nessuna operazione.`);
+} else if (acquireLock()) {
   main()
     .catch((error) => {
       console.error(`Errore generale [${new Date().toISOString()}]:`, error.message);
