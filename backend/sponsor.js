@@ -3,6 +3,7 @@
 // Non conosce mai i dati degli utenti — riceve solo address e parametri.
 
 const { ethers } = require("ethers");
+const { assertRpcEnabled } = require("./serviceStatus");
 
 const RPC_URL = process.env.LUKSO_RPC_URL || "https://rpc.testnet.lukso.network";
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
@@ -38,6 +39,7 @@ async function waitWithRetry(tx, attempts = 3, delayMs = 2000) {
 }
 
 function getSponsorContract() {
+  assertRpcEnabled();
   const provider = new ethers.JsonRpcProvider(RPC_URL, 42, { staticNetwork: true, batchMaxCount: 1 });
   const wallet = new ethers.Wallet(SPONSOR_PRIVATE_KEY, provider);
   return new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, wallet);

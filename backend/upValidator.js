@@ -2,6 +2,7 @@
 // Interface ID LSP0ERC725Account = 0x24871b3d (da @lukso/lsp0-contracts, LSP0Constants.sol)
 const { ethers } = require("ethers");
 const { INTERFACE_ID_LSP0 } = require("@lukso/lsp0-contracts");
+const { rpcEnabled } = require("./serviceStatus");
 
 const provider = new ethers.JsonRpcProvider(process.env.LUKSO_RPC_URL, 42, { staticNetwork: true, batchMaxCount: 1 });
 const ERC165_ABI = ["function supportsInterface(bytes4) view returns (bool)"];
@@ -14,6 +15,9 @@ async function validateUPAddress(address) {
     return { valid: false, reason: "invalid_format" };
   }
   const checksummed = ethers.getAddress(address);
+  if (!rpcEnabled()) {
+    return { valid: false, reason: "rpc_disabled" };
+  }
 
   const code = await provider.getCode(checksummed);
   if (code === "0x") {

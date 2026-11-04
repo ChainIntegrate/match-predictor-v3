@@ -7,6 +7,7 @@ const { generateUserWallet } = require("./keys");
 const { validateUPAddress } = require("./upValidator");
 const { sendMagicLink, verifyMagicLink, sendNewUserNotification, sendNewMatchesNotification, generateAccessToken, generateRefreshToken, rotateRefreshToken, requireAuth } = require("./auth");
 const { predictFor, predictBatchFor, claimFor } = require("./sponsor");
+const { registrationsOpen, rpcEnabled } = require("./serviceStatus");
 const { ethers } = require("ethers");
 const fs = require("fs");
 const path = require("path");
@@ -22,6 +23,27 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json({ limit: "5mb" })); // default 100kb: troppo poco per il payload di /api/matches-data con centinaia di partite in cache
+
+// ── Servizio sospeso: blocco chiamate RPC ─────────────────────────────────
+// Con RPC_ENABLED diverso da "true" tutti gli endpoint che parlano con il
+// nodo LUKSO (proxy, pronostici, claim, validazione UP, firme admin)
+// rispondono subito 503 senza toccare il nodo.
+const RPC_ROUTES = [
+  /^\/api\/rpc$/,
+  /^\/api\/auth\/validate-up$/,
+  /^\/api\/user\/link-up$/,
+  /^\/api\/predict(\/batch)?$/,
+  /^\/api\/claim$/,
+  /^\/api\/admin\//
+];
+app.use((req, res, next) => {
+  if (!rpcEnabled() && RPC_ROUTES.some(re => re.test(req.path))) {
+    return res.status(503).json({ success: false, error: "Servizio blockchain temporaneamente sospeso", code: "RPC_DISABLED" });
+  }
+  next();
+});
+
+const REGISTRATIONS_CLOSED_ERROR = { success: false, error: "Le iscrizioni sono chiuse", code: "REGISTRATIONS_CLOSED" };
 
 // ── Helper ────────────────────────────────────────────────────────────────
 function readMatchesData() {
@@ -68,6 +90,7 @@ async function withRetry(fn) {
 }
 
 async function verifyOwnerSignature(message, signature) {
+  if (!rpcEnabled()) return false; // servizio sospeso: nessuna chiamata al nodo
   const provider = new ethers.JsonRpcProvider(process.env.LUKSO_RPC_URL, 42, { staticNetwork: true, batchMaxCount: 1 });
   const upAbi = ["function isValidSignature(bytes32 hash, bytes memory signature) external view returns (bytes4)"];
   const up = new ethers.Contract(process.env.OWNER_UP_ADDRESS, upAbi, provider);
@@ -87,7 +110,7 @@ async function verifyOwnerSignature(message, signature) {
 
 // ── Health ────────────────────────────────────────────────────────────────
 app.get("/api/health", (req, res) => {
-  res.json({ success: true, status: "online", service: "matchpredictor-v3" });
+  res.json({ success: true, status: "online", service: "matchpredictor-v3", registrationsOpen: registrationsOpen(), rpcEnabled: rpcEnabled() });
 });
 
 // ── Auth: verifica se email già registrata ────────────────────────────────
@@ -112,6 +135,12 @@ app.post("/api/auth/request-link", async (req, res) => {
   const { email, upAddress, marketingConsent } = req.body;
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return res.status(400).json({ success: false, error: "Email non valida" });
+  }
+
+  // Iscrizioni chiuse: il magic link viene inviato solo a chi ha già un account
+  if (!registrationsOpen()) {
+    const existingUser = db.prepare("SELECT id FROM users WHERE email = ?").get(email.toLowerCase().trim());
+    if (!existingUser) return res.status(403).json(REGISTRATIONS_CLOSED_ERROR);
   }
 
   let validatedUP = null;
@@ -148,6 +177,11 @@ app.get("/api/auth/verify", async (req, res) => {
   const { email, upAddress, marketingConsent } = verified;
   let user = db.prepare("SELECT * FROM users WHERE email = ?").get(email);
   const isNewRegistration = !user;
+
+  // Link di registrazione inviati prima della chiusura: non creano più account
+  if (isNewRegistration && !registrationsOpen()) {
+    return res.status(403).json(REGISTRATIONS_CLOSED_ERROR);
+  }
 
   if (!user) {
     if (upAddress) {
